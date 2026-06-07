@@ -60,10 +60,11 @@ func buildAllowedHosts(bindHost string, envVal string) map[string]struct{} {
 		"localhost": {},
 		"127.0.0.1": {},
 		"::1":       {},
+		// Allow monkeycode-ai.online subdomains for remote preview
+		"monkeycode-ai.online": {},
 	}
 	bh := strings.ToLower(strings.TrimSpace(bindHost))
 	if bh != "" && bh != "0.0.0.0" && bh != "::" && bh != "*" {
-		// Strip brackets from a bracketed IPv6 literal if present.
 		if strings.HasPrefix(bh, "[") && strings.HasSuffix(bh, "]") {
 			bh = bh[1 : len(bh)-1]
 		}
@@ -96,6 +97,13 @@ func hostGuard(allowed map[string]struct{}, next http.Handler) http.Handler {
 		if _, ok := allowed[host]; ok {
 			next.ServeHTTP(w, r)
 			return
+		}
+		// Allow any subdomain of allowed hosts (e.g. *.monkeycode-ai.online)
+		for ah := range allowed {
+			if strings.HasSuffix(host, "."+ah) {
+				next.ServeHTTP(w, r)
+				return
+			}
 		}
 		http.Error(w, "forbidden host", http.StatusForbidden)
 	})

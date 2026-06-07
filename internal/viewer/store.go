@@ -25,9 +25,9 @@ func SessionsRoot() (string, error) {
 
 // RepoInfo represents a discovered repository from the sessions directory.
 type RepoInfo struct {
-	EncodedPath  string // encoded directory name on disk
-	SessionCount int
-	LastModified time.Time
+	EncodedPath  string    `json:"encodedPath"` // encoded directory name on disk
+	SessionCount int       `json:"sessionCount"`
+	LastModified time.Time `json:"lastModified"`
 }
 
 // DiscoverRepos walks the sessions root and returns one entry per subdirectory.
@@ -75,19 +75,24 @@ func DiscoverRepos(root string) ([]RepoInfo, error) {
 
 // SessionSummary is built from session_start and session_end records.
 type SessionSummary struct {
-	SessionID     string
-	Timestamp     time.Time
-	CWD           string
-	GitBranch     string
-	Model         string
-	ReviewMode    string
-	DiffFrom      string
-	DiffTo        string
-	DiffCommit    string
-	FilesReviewed []string
-	DurationSec   float64
-	FileCount     int
-	LLMFailures   int
+	SessionID     string    `json:"sessionID"`
+	EncodedRepo   string    `json:"encodedRepo,omitempty"`
+	Timestamp     time.Time `json:"timestamp"`
+	CWD           string    `json:"cwd"`
+	RepoName      string    `json:"repoName,omitempty"`
+	RepoPath      string    `json:"repoPath,omitempty"`
+	GitBranch     string    `json:"gitBranch"`
+	Model         string    `json:"model"`
+	ReviewMode    string    `json:"reviewMode"`
+	DiffFrom      string    `json:"diffFrom"`
+	DiffTo        string    `json:"diffTo"`
+	DiffCommit    string    `json:"diffCommit"`
+	FilesReviewed []string  `json:"filesReviewed"`
+	DurationSec   float64   `json:"durationSec"`
+	FileCount     int       `json:"fileCount"`
+	LLMFailures   int       `json:"llmFailures"`
+	WarningCount   int       `json:"warningCount,omitempty"`
+	Status        string    `json:"status"`
 }
 
 // ListSessions returns lightweight summaries for all sessions in a repo subdir.
@@ -108,7 +113,11 @@ func ListSessions(root, encodedRepo string) ([]SessionSummary, error) {
 		if err != nil {
 			continue // skip unreadable files
 		}
+		if s.Timestamp.IsZero() || s.CWD == "" {
+			continue
+		}
 		s.SessionID = sessionID
+		s.EncodedRepo = encodedRepo
 		summaries = append(summaries, s)
 	}
 
@@ -127,6 +136,10 @@ func peekSession(path string) (SessionSummary, error) {
 	defer f.Close()
 
 	var summary SessionSummary
+	seenFiles := make(map[string]struct{})
+	hasSessionEnd := false
+	mainFailures := 0
+	warningFailures := 0
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
@@ -165,6 +178,20 @@ func peekSession(path string) (SessionSummary, error) {
 			if v, ok := rec["diffCommit"].(string); ok {
 				summary.DiffCommit = v
 			}
+		} else {
+			var rec map[string]any
+			if err := json.Unmarshal(line, &rec); err == nil {
+				if filePath, ok := rec["filePath"].(string); ok && filePath != "" {
+					seenFiles[filePath] = struct{}{}
+				}
+				if typ, _ := rec["type"].(string); typ == "llm_error" {
+					if taskType, _ := rec["taskType"].(string); taskType == string(ReLocationTask) {
+						warningFailures++
+					} else {
+						mainFailures++
+					}
+				}
+			}
 		}
 	}
 
@@ -172,6 +199,7 @@ func peekSession(path string) (SessionSummary, error) {
 		var rec map[string]any
 		if err := json.Unmarshal(lastLine, &rec); err == nil {
 			if typ, _ := rec["type"].(string); typ == "session_end" {
+				hasSessionEnd = true
 				if dur, ok := rec["duration_seconds"].(float64); ok {
 					summary.DurationSec = dur
 				}
@@ -189,40 +217,63 @@ func peekSession(path string) (SessionSummary, error) {
 			}
 		}
 	}
+	if summary.FilesReviewed == nil && len(seenFiles) > 0 {
+		summary.FilesReviewed = make([]string, 0, len(seenFiles))
+		for filePath := range seenFiles {
+			summary.FilesReviewed = append(summary.FilesReviewed, filePath)
+		}
+		sort.Strings(summary.FilesReviewed)
+	}
 	summary.FileCount = len(summary.FilesReviewed)
+	if hasSessionEnd {
+		if summary.FileCount == 0 {
+			summary.Status = "failed"
+		} else if mainFailures > 0 {
+			summary.Status = "failed"
+		} else if warningFailures > 0 {
+			summary.Status = "completed_with_warnings"
+			summary.WarningCount = warningFailures
+		} else {
+			summary.Status = "completed"
+		}
+	} else if reviewProcessRunning(summary.CWD) {
+		summary.Status = "running"
+	} else {
+		summary.Status = "failed"
+	}
 	return summary, scanner.Err()
 }
 
 // ViewSession holds fully parsed records for one session.
 type ViewSession struct {
-	Summary    SessionSummary
-	TokenUsage TokenUsageSummary
-	Files      []*FileGroup // ordered by file path
+	Summary    SessionSummary    `json:"summary"`
+	TokenUsage TokenUsageSummary `json:"tokenUsage"`
+	Files      []*FileGroup      `json:"files"` // ordered by file path
 }
 
 // TokenUsageSummary aggregates token counts across the session.
 type TokenUsageSummary struct {
-	TotalPromptTokens     int
-	TotalCompletionTokens int
-	TotalCacheReadTokens  int
-	TotalCacheWriteTokens int
-	RequestCount          int
-	FileTokenBreakdown    []FileTokenUsage
+	TotalPromptTokens     int              `json:"totalPromptTokens"`
+	TotalCompletionTokens int              `json:"totalCompletionTokens"`
+	TotalCacheReadTokens  int              `json:"totalCacheReadTokens"`
+	TotalCacheWriteTokens int              `json:"totalCacheWriteTokens"`
+	RequestCount          int              `json:"requestCount"`
+	FileTokenBreakdown    []FileTokenUsage `json:"fileTokenBreakdown"`
 }
 
 // FileTokenUsage tracks token totals for a single file within a session.
 type FileTokenUsage struct {
-	FilePath         string
-	PromptTokens     int
-	CompletionTokens int
-	CacheReadTokens  int
-	CacheWriteTokens int
+	FilePath         string `json:"filePath"`
+	PromptTokens     int    `json:"promptTokens"`
+	CompletionTokens int    `json:"completionTokens"`
+	CacheReadTokens  int    `json:"cacheReadTokens"`
+	CacheWriteTokens int    `json:"cacheWriteTokens"`
 }
 
 // FileGroup aggregates records for a single file.
 type FileGroup struct {
-	FilePath string
-	Tasks    map[TaskType][]*TaskCard
+	FilePath string                   `json:"filePath"`
+	Tasks    map[TaskType][]*TaskCard `json:"tasks"`
 }
 
 // TaskType mirrors session.TaskType.
@@ -237,26 +288,26 @@ const (
 
 // TaskCard links an LLM request with its response and tool calls.
 type TaskCard struct {
-	RequestMessages  any // preserved for display
-	RequestNo        int
-	ResponseContent  string
-	ToolCalls        []ToolCallInfo
-	DurationMs       int64
-	Error            string
-	Model            string
-	PromptTokens     int
-	CompletionTokens int
-	CacheReadTokens  int
-	CacheWriteTokens int
+	RequestMessages  any            `json:"requestMessages"` // preserved for display
+	RequestNo        int            `json:"requestNo"`
+	ResponseContent  string         `json:"responseContent"`
+	ToolCalls        []ToolCallInfo `json:"toolCalls"`
+	DurationMs       int64          `json:"durationMs"`
+	Error            string         `json:"error"`
+	Model            string         `json:"model"`
+	PromptTokens     int            `json:"promptTokens"`
+	CompletionTokens int            `json:"completionTokens"`
+	CacheReadTokens  int            `json:"cacheReadTokens"`
+	CacheWriteTokens int            `json:"cacheWriteTokens"`
 }
 
 // ToolCallInfo summarizes a single tool call.
 type ToolCallInfo struct {
-	Name       string
-	Arguments  string
-	Result     string
-	Ok         bool
-	DurationMs int64
+	Name       string `json:"name"`
+	Arguments  string `json:"arguments"`
+	Result     string `json:"result"`
+	Ok         bool   `json:"ok"`
+	DurationMs int64  `json:"durationMs"`
 }
 
 // LoadSession fully parses a JSONL file into a ViewSession.
@@ -270,6 +321,9 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 	vs := &ViewSession{Files: make([]*FileGroup, 0)}
 	fileIndex := make(map[string]*FileGroup)
+	hasSessionEnd := false
+	mainFailures := 0
+	warningFailures := 0
 
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 1024*1024)
@@ -398,6 +452,11 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			fp, _ := rec["filePath"].(string)
 			tt, _ := rec["taskType"].(string)
 			errStr, _ := rec["error"].(string)
+			if tt == string(ReLocationTask) {
+				warningFailures++
+			} else {
+				mainFailures++
+			}
 			durationMs := int64(0)
 			if d, ok := rec["duration_ms"].(float64); ok {
 				durationMs = int64(d)
@@ -443,6 +502,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			}
 
 		case "session_end":
+			hasSessionEnd = true
 			if dur, ok := rec["duration_seconds"].(float64); ok {
 				vs.Summary.DurationSec = dur
 			}
@@ -459,6 +519,22 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 				vs.Summary.LLMFailures = int(f)
 			}
 		}
+	}
+	if hasSessionEnd {
+		if vs.Summary.FileCount == 0 {
+			vs.Summary.Status = "failed"
+		} else if mainFailures > 0 {
+			vs.Summary.Status = "failed"
+		} else if warningFailures > 0 {
+			vs.Summary.Status = "completed_with_warnings"
+			vs.Summary.WarningCount = warningFailures
+		} else {
+			vs.Summary.Status = "completed"
+		}
+	} else if reviewProcessRunning(vs.Summary.CWD) {
+		vs.Summary.Status = "running"
+	} else {
+		vs.Summary.Status = "failed"
 	}
 
 	// Aggregate token usage across all task cards
@@ -493,4 +569,55 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 	vs.Summary.SessionID = sessionID
 	return vs, scanner.Err()
+}
+
+func reviewProcessRunning(repoPath string) bool {
+	if repoPath == "" {
+		return false
+	}
+
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !isDigits(entry.Name()) {
+			continue
+		}
+		cmdline, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "cmdline"))
+		if err != nil || len(cmdline) == 0 {
+			continue
+		}
+		args := strings.Split(strings.TrimRight(string(cmdline), "\x00"), "\x00")
+		if len(args) < 4 {
+			continue
+		}
+		for i, arg := range args {
+			if arg == "--repo" && i+1 < len(args) && args[i+1] == repoPath && containsArg(args, "review") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func containsArg(args []string, needle string) bool {
+	for _, arg := range args {
+		if arg == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func isDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }

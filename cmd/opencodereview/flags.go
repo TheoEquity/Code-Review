@@ -108,6 +108,7 @@ type reviewOptions struct {
 	maxTools       int
 	maxGitProcs    int
 	preview        bool
+	full           bool
 	showHelp       bool
 }
 
@@ -130,6 +131,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file; only takes effect when greater than template default")
 	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	a.BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be reviewed without running the LLM")
+	a.BoolVar(&opts.full, "full", false, "review all tracked files in the repository")
 
 	if err := a.Parse(args); err != nil {
 		return opts, fmt.Errorf("parse flags: %w", err)
@@ -147,9 +149,12 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	if opts.commit != "" {
 		modeCount++
 	}
+	if opts.full {
+		modeCount++
+	}
 	// modeCount == 0 → workspace mode (no error, allowed)
 	if modeCount > 1 {
-		return opts, fmt.Errorf("only one review mode allowed (--from/--to or --commit)")
+		return opts, fmt.Errorf("only one review mode allowed (--from/--to, --commit, or --full)")
 	}
 	if opts.from != "" && opts.to == "" {
 		return opts, fmt.Errorf("--to is required when --from is specified")
@@ -183,6 +188,9 @@ Examples:
   # Review staged + unstaged + untracked changes in current workspace
   ocr review
 
+  # Review all tracked files in the repository
+  ocr review --full
+
   # Review a branch against its base (merge-base mode)
   ocr review --from master --to dev-ref
 
@@ -207,6 +215,7 @@ Flags:
   -c, --commit string     single commit hash or tag to review (vs its parent)
   -f, --format string     output format: text or json (default "text")
   --concurrency int       max concurrent file reviews (default 8)
+  --full                  review all tracked files in the repository
   --max-git-procs int     max concurrent git subprocesses (default 16)
   --from string           source ref to start diff from (e.g., 'main')
   --max-tools int         max tool call rounds per file; only takes effect when greater than template default

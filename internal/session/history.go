@@ -26,6 +26,7 @@ const (
 	ReviewModeWorkspace = "workspace"
 	ReviewModeRange     = "range"
 	ReviewModeCommit    = "commit"
+	ReviewModeFull      = "full"
 )
 
 // SessionHistory is the top-level container for an entire CR run.

@@ -95,7 +95,7 @@ func runReview(args []string) error {
 	gitRunner := gitcmd.New(opts.maxGitProcs)
 
 	collector := tool.NewCommentCollector()
-	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
+	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit, opts.full)
 	ref, _ := mode.RefValue(opts.to, opts.commit)
 	fileReader := &tool.FileReader{
 		RepoDir: repoDir,
@@ -110,6 +110,7 @@ func runReview(args []string) error {
 		From:                  opts.from,
 		To:                    opts.to,
 		Commit:                opts.commit,
+		ReviewMode:            reviewModeFromOptions(opts),
 		Template:              *tpl,
 		SystemRule:            resolver,
 		FileFilter:            fileFilter,
@@ -223,6 +224,7 @@ func runPreview(repoDir string, opts reviewOptions, fileFilter *rules.FileFilter
 		From:       opts.from,
 		To:         opts.to,
 		Commit:     opts.commit,
+		ReviewMode: reviewModeFromOptions(opts),
 		FileFilter: fileFilter,
 		GitRunner:  gitRunner,
 	})
@@ -234,6 +236,13 @@ func runPreview(repoDir string, opts reviewOptions, fileFilter *rules.FileFilter
 
 	outputPreviewText(preview)
 	return nil
+}
+
+func reviewModeFromOptions(opts reviewOptions) string {
+	if opts.full {
+		return "full"
+	}
+	return ""
 }
 
 func buildToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader) *tool.Registry {

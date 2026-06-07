@@ -23,6 +23,143 @@ func StartServer(addr string) error {
 
 	// Static assets (must be registered before "/" catch-all)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))))
+	mux.HandleFunc("/api/repos", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			handleReposAPI(w, r, root)
+		case http.MethodPost:
+			handleAddRepoAPI(w, r, root)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/repos/{repo}/token", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		repo := r.PathValue("repo")
+		if !validatePathValue(repo) {
+			http.Error(w, "invalid repo path", http.StatusBadRequest)
+			return
+		}
+		handleUpdateRepoTokenAPI(w, r, repo)
+	})
+	mux.HandleFunc("/api/repos/{repo}/sync", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		repo := r.PathValue("repo")
+		if !validatePathValue(repo) {
+			http.Error(w, "invalid repo path", http.StatusBadRequest)
+			return
+		}
+		handleSyncRepoAPI(w, r, root, repo)
+	})
+	mux.HandleFunc("/api/repos/{repo}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		repo := r.PathValue("repo")
+		if !validatePathValue(repo) {
+			http.Error(w, "invalid repo path", http.StatusBadRequest)
+			return
+		}
+		handleDeleteRepoAPI(w, r, root, repo)
+	})
+	mux.HandleFunc("/api/repos/{repo}/sessions", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		repo := r.PathValue("repo")
+		if !validatePathValue(repo) {
+			http.Error(w, "invalid repo path", http.StatusBadRequest)
+			return
+		}
+		handleSessionsAPI(w, r, root, repo)
+	})
+	mux.HandleFunc("/api/repos/{repo}/sessions/{sessionID}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodDelete {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		repo := r.PathValue("repo")
+		sid := r.PathValue("sessionID")
+		if !validatePathValue(repo) || !validatePathValue(sid) {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			handleDeleteSessionAPI(w, r, root, repo, sid)
+			return
+		}
+		handleSessionAPI(w, r, root, repo, sid)
+	})
+	mux.HandleFunc("/api/repos/{repo}/status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		repo := r.PathValue("repo")
+		if !validatePathValue(repo) {
+			http.Error(w, "invalid repo path", http.StatusBadRequest)
+			return
+		}
+		handleRepoStatusAPI(w, r, root, repo)
+	})
+	mux.HandleFunc("/api/sessions", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleAllSessionsAPI(w, r, root)
+	})
+	mux.HandleFunc("/api/reviews", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleCreateReviewTaskAPI(w, r, root)
+	})
+	mux.HandleFunc("/api/reviews/{taskID}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		taskID := r.PathValue("taskID")
+		if !validatePathValue(taskID) && !strings.HasPrefix(taskID, "review-") {
+			http.Error(w, "invalid task id", http.StatusBadRequest)
+			return
+		}
+		handleReviewTaskAPI(w, r, taskID)
+	})
+	mux.HandleFunc("/api/config/llm", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			handleLLMConfigAPI(w, r)
+		case http.MethodPost:
+			handleSaveLLMConfigAPI(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/rules", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleRulesAPI(w, r, root)
+	})
+	mux.HandleFunc("/api/branches", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleListBranchesAPI(w, r, root)
+	})
 
 	// Routes
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +167,7 @@ func StartServer(addr string) error {
 	})
 	mux.HandleFunc("/r/{repo}", func(w http.ResponseWriter, r *http.Request) {
 		repo := r.PathValue("repo")
-		if strings.Contains(repo, "..") || strings.Contains(repo, "/") {
+		if !validatePathValue(repo) {
 			http.Error(w, "invalid repo path", http.StatusBadRequest)
 			return
 		}
@@ -39,7 +176,7 @@ func StartServer(addr string) error {
 	mux.HandleFunc("/r/{repo}/{sessionID}", func(w http.ResponseWriter, r *http.Request) {
 		repo := r.PathValue("repo")
 		sid := r.PathValue("sessionID")
-		if strings.Contains(repo, "..") || strings.Contains(sid, "..") {
+		if !validatePathValue(repo) || !validatePathValue(sid) {
 			http.Error(w, "invalid path", http.StatusBadRequest)
 			return
 		}

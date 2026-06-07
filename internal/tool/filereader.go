@@ -24,10 +24,15 @@ const (
 	ModeRange
 	// ModeCommit reads files as they exist at a specific commit hash.
 	ModeCommit
+	// ModeFull reads files from the current working tree.
+	ModeFull
 )
 
 // ParseReviewMode returns the correct ReviewMode based on provided flag values.
-func ParseReviewMode(from, to, commit string) ReviewMode {
+func ParseReviewMode(from, to, commit string, full bool) ReviewMode {
+	if full {
+		return ModeFull
+	}
 	if commit != "" {
 		return ModeCommit
 	}
@@ -38,7 +43,7 @@ func ParseReviewMode(from, to, commit string) ReviewMode {
 }
 
 // RefValue returns the git ref that should be used for reading file contents
-// in range or commit mode. Returns ("", false) for workspace mode.
+// in range or commit mode. Returns ("", false) for workspace/full mode.
 func (m ReviewMode) RefValue(toRef, commit string) (string, bool) {
 	switch m {
 	case ModeRange:
@@ -62,11 +67,11 @@ type FileReader struct {
 
 // Read returns the full content of a file path (relative to RepoDir),
 // resolved according to the active review mode.
-// - Workspace: reads directly from the filesystem.
+// - Workspace / Full: reads directly from the filesystem.
 // - Range / Commit: uses `git show <Ref>:<path>` to read at the given ref.
 func (fr *FileReader) Read(ctx context.Context, path string) (string, error) {
 	switch fr.Mode {
-	case ModeWorkspace:
+	case ModeWorkspace, ModeFull:
 		return fr.readFromDisk(path)
 	case ModeRange, ModeCommit:
 		return fr.readFromGitShow(ctx, path)
@@ -110,7 +115,7 @@ func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (s
 // startLine is 1-based; maxLines is the maximum number of lines to collect.
 func (fr *FileReader) ReadLines(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
 	switch fr.Mode {
-	case ModeWorkspace:
+	case ModeWorkspace, ModeFull:
 		return fr.readLinesFromDisk(path, startLine, maxLines)
 	case ModeRange, ModeCommit:
 		innerCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

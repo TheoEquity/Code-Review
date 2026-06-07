@@ -39,7 +39,18 @@ module.exports = {
     extensions: ['.ts', '.tsx', '.js', '.jsx']
   },
   devServer: {
+    host: '0.0.0.0',
     port: 3030,
+    allowedHosts: 'all',
+    hot: true,
+    liveReload: true,
+    proxy: [
+      {
+        context: ['/api'],
+        target: 'http://localhost:5483',
+        changeOrigin: true
+      }
+    ],
     static: { directory: __dirname },
     historyApiFallback: {
       index: '/index.html',

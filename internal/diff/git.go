@@ -32,6 +32,63 @@ var providerDirIgnoreDirs = []string{
 	"pkgs/",
 }
 
+var fullModeSourceExts = map[string]struct{}{
+	".bash":    {},
+	".c":       {},
+	".cc":      {},
+	".cjs":     {},
+	".cpp":     {},
+	".cs":      {},
+	".css":     {},
+	".cxx":     {},
+	".dart":    {},
+	".erl":     {},
+	".ex":      {},
+	".exs":     {},
+	".fish":    {},
+	".fs":      {},
+	".go":      {},
+	".groovy":  {},
+	".h":       {},
+	".hpp":     {},
+	".hrl":     {},
+	".html":    {},
+	".htm":     {},
+	".hxx":     {},
+	".java":    {},
+	".js":      {},
+	".jsx":     {},
+	".kt":      {},
+	".kts":     {},
+	".less":    {},
+	".lua":     {},
+	".m":       {},
+	".mjs":     {},
+	".mm":      {},
+	".php":     {},
+	".pl":      {},
+	".pm":      {},
+	".ps1":     {},
+	".py":      {},
+	".pyi":     {},
+	".r":       {},
+	".rake":    {},
+	".rb":      {},
+	".rs":      {},
+	".sass":    {},
+	".scala":   {},
+	".scss":    {},
+	".sh":      {},
+	".sql":     {},
+	".svelte":  {},
+	".swift":   {},
+	".ts":      {},
+	".tsx":     {},
+	".vb":      {},
+	".vue":     {},
+	".zsh":     {},
+}
+
 // Mode defines how the diff is retrieved.
 type Mode int
 
@@ -39,6 +96,7 @@ const (
 	ModeWorkspace Mode = iota // current workspace (staged + unstaged + untracked)
 	ModeCommit                // single commit vs its parent
 	ModeRange                 // merge-base(from,to)..to
+	ModeFull                  // every tracked file in the repository
 )
 
 // Provider retrieves and parse git diffs from a repository.
@@ -82,6 +140,15 @@ func NewWorkspaceProvider(repoDir string, runner *gitcmd.Runner) *Provider {
 	return &Provider{
 		repoDir: repoDir,
 		mode:    ModeWorkspace,
+		runner:  runner,
+	}
+}
+
+// NewFullProvider creates a Provider for full repository mode.
+func NewFullProvider(repoDir string, runner *gitcmd.Runner) *Provider {
+	return &Provider{
+		repoDir: repoDir,
+		mode:    ModeFull,
 		runner:  runner,
 	}
 }
@@ -143,6 +210,13 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 			combined.WriteString(ud)
 			combined.WriteString("\n\n")
 		}
+
+	case ModeFull:
+		diffs, err := p.fullRepositoryDiffs(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("full repository diff failed: %w", err)
+		}
+		return p.filterDiffs(diffs), nil
 	}
 
 	var ref string
@@ -292,30 +366,83 @@ func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
 		if rerr != nil {
 			continue
 		}
-
-		lineCount := bytes.Count(content, []byte{'\n'})
-		if len(content) > 0 && content[len(content)-1] != '\n' {
-			lineCount++
-		}
-
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n", f, f))
-		sb.WriteString("--- /dev/null\n")
-		sb.WriteString(fmt.Sprintf("+++ b/%s\n", f))
-		sb.WriteString(fmt.Sprintf("@@ -0,0 +1,%d @@\n", lineCount))
-
-		lines := bytes.Split(content, []byte{'\n'})
-		if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
-			lines = lines[:len(lines)-1]
-		}
-		for _, line := range lines {
-			sb.WriteByte('+')
-			sb.Write(line)
-			sb.WriteByte('\n')
-		}
-		results = append(results, sb.String())
+		results = append(results, buildAddedFileDiffText(f, content))
 	}
 	return results, nil
+}
+
+func (p *Provider) fullRepositoryDiffs(ctx context.Context) ([]model.Diff, error) {
+	out, err := p.runGit(ctx, "ls-files", "-z")
+	if err != nil {
+		return nil, err
+	}
+
+	patterns := p.loadGitignorePatterns()
+	var diffs []model.Diff
+	for _, relPath := range strings.Split(out, "\x00") {
+		relPath = strings.TrimSpace(relPath)
+		if relPath == "" || p.isPathExcluded(relPath, patterns) || !isFullModeSourceFile(relPath) {
+			continue
+		}
+
+		fullPath := filepath.Join(p.repoDir, relPath)
+		stat, serr := os.Stat(fullPath)
+		if serr != nil || stat.IsDir() {
+			continue
+		}
+
+		content, rerr := os.ReadFile(fullPath)
+		if rerr != nil {
+			continue
+		}
+
+		lineCount := countContentLines(content)
+		diffs = append(diffs, model.Diff{
+			OldPath:        relPath,
+			NewPath:        relPath,
+			Diff:           buildAddedFileDiffText(relPath, content),
+			NewFileContent: string(content),
+			IsBinary:       bytes.Contains(content, []byte{'\x00'}),
+			IsNew:          true,
+			Insertions:     int64(lineCount),
+		})
+	}
+	return diffs, nil
+}
+
+func isFullModeSourceFile(relPath string) bool {
+	ext := strings.ToLower(filepath.Ext(relPath))
+	_, ok := fullModeSourceExts[ext]
+	return ok
+}
+
+func countContentLines(content []byte) int {
+	lineCount := bytes.Count(content, []byte{'\n'})
+	if len(content) > 0 && content[len(content)-1] != '\n' {
+		lineCount++
+	}
+	return lineCount
+}
+
+func buildAddedFileDiffText(path string, content []byte) string {
+	lineCount := countContentLines(content)
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n", path, path))
+	sb.WriteString("--- /dev/null\n")
+	sb.WriteString(fmt.Sprintf("+++ b/%s\n", path))
+	sb.WriteString(fmt.Sprintf("@@ -0,0 +1,%d @@\n", lineCount))
+
+	lines := bytes.Split(content, []byte{'\n'})
+	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
+		lines = lines[:len(lines)-1]
+	}
+	for _, line := range lines {
+		sb.WriteByte('+')
+		sb.Write(line)
+		sb.WriteByte('\n')
+	}
+	return sb.String()
 }
 
 func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {

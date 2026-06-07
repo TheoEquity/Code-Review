@@ -57,7 +57,7 @@ type Args struct {
 	// Commit is a single commit hash to review (vs its parent).
 	Commit string
 
-	// ReviewMode is one of "workspace", "range", or "commit".
+	// ReviewMode is one of "workspace", "range", "commit", or "full".
 	// When empty, it is derived from From/To/Commit at session creation time.
 	ReviewMode string
 
@@ -238,7 +238,7 @@ func New(args Args) *Agent {
 		gitBranch := detectGitBranch(args.RepoDir)
 		mode := args.ReviewMode
 		if mode == "" {
-			mode = reviewModeString(args.From, args.To, args.Commit)
+			mode = reviewModeString(args.From, args.To, args.Commit, args.ReviewMode)
 		}
 		args.Session = session.New(args.RepoDir, gitBranch, args.Model, session.SessionOptions{
 			ReviewMode: mode,
@@ -368,6 +368,8 @@ func (a *Agent) loadDiffs(ctx context.Context) error {
 	var provider *diff.Provider
 
 	switch {
+	case a.args.ReviewMode == session.ReviewModeFull:
+		provider = diff.NewFullProvider(a.args.RepoDir, a.args.GitRunner)
 	case a.args.Commit != "":
 		provider = diff.NewCommitProvider(a.args.RepoDir, a.args.Commit, a.args.GitRunner)
 	case a.args.From != "" && a.args.To != "":
@@ -1357,7 +1359,10 @@ func buildMessageXML(msgs []llm.Message) string {
 	return sb.String()
 }
 
-func reviewModeString(from, to, commit string) string {
+func reviewModeString(from, to, commit, mode string) string {
+	if mode == session.ReviewModeFull {
+		return session.ReviewModeFull
+	}
 	if commit != "" {
 		return session.ReviewModeCommit
 	}
