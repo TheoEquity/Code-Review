@@ -15,6 +15,124 @@
 
 ---
 
+## TheoEquity Code Review 自开发版本
+
+本仓库基于 Alibaba Open Code Review 二次开发，重点增强了 Web 管理台、全量仓库审计、仓库管理、任务清单、问题清单和规则管理能力。后续部署和安装直接使用本仓库即可。
+
+### 自开发功能
+
+- **Web 管理台**：提供仓库管理、新建任务、任务清单、任务详情、规则管理和模型配置页面。
+- **本地仓库优先**：仓库以本地路径为主，远程地址用于同步；支持保存仓库名称、本地地址、远程地址、文件数、Token、任务数和同步操作。
+- **全量审计模式**：新增 `--full` 模式，可对整个仓库进行审计，并默认过滤明显非源码文件，降低 Token 消耗。
+- **任务状态修正**：运行中、成功、失败、部分完成按会话 JSONL 和进程状态推导，避免成功失败混淆。
+- **问题清单**：从 `code_comment` 工具调用中提取问题，按当前仓库和当前会话隔离展示，支持去重。
+- **任务详情增强**：展示每个文件的 LLM 请求、响应、工具调用、耗时、Token 和失败信息。
+- **规则管理展示**：展示当前系统的 4 层规则优先级：`--rule`、项目规则、全局规则、系统内置规则；当前默认启用系统内置 `13` 条路径规则和 `1` 条默认规则。
+
+### 从本仓库安装
+
+```bash
+git clone https://github.com/TheoEquity/Code-Review.git
+cd Code-Review
+git checkout 260607-feat-viewer-full-audit-console
+
+# Build frontend assets
+cd pages
+npm install
+npm run build
+
+# Build CLI / viewer binary
+cd ..
+go build -o ./dist/opencodereview ./cmd/opencodereview
+```
+
+安装到系统命令路径：
+
+```bash
+cp ./dist/opencodereview /usr/local/bin/ocr
+```
+
+如当前用户没有 `/usr/local/bin` 写入权限，可以把二进制复制到自己的工具目录，并把该目录加入 `PATH`。
+
+### 配置模型
+
+```bash
+ocr config set llm.url https://your-llm-endpoint
+ocr config set llm.auth_token your-api-key
+ocr config set llm.model your-model-name
+ocr config set llm.use_anthropic true
+```
+
+也可以使用环境变量：
+
+```bash
+export OCR_LLM_URL=https://your-llm-endpoint
+export OCR_LLM_TOKEN=your-api-key
+export OCR_LLM_MODEL=your-model-name
+export OCR_USE_ANTHROPIC=true
+```
+
+测试模型连通性：
+
+```bash
+ocr llm test
+```
+
+### 启动 Web 管理台
+
+```bash
+ocr viewer --addr 127.0.0.1:5483
+```
+
+如果通过域名或反向代理访问 viewer，需要配置允许的 Host：
+
+```bash
+OCR_VIEWER_ALLOWED_HOSTS=your-domain.example.com ocr viewer --addr 127.0.0.1:5483
+```
+
+### CLI 使用方式
+
+在目标项目目录下执行：
+
+```bash
+# 审查当前 Git 工作区变更
+ocr review
+
+# 全量审计当前仓库
+ocr review --full
+
+# 审查两个分支或引用之间的差异
+ocr review --from main --to feature-branch
+
+# 审查指定提交
+ocr review --commit abc123
+```
+
+### Web 管理台使用流程
+
+1. 启动 `ocr viewer`。
+2. 打开 Web 管理台。
+3. 在“仓库管理”中添加仓库名称和本地地址，可选填写远程地址。
+4. 在“新建任务”中选择仓库和任务模式，默认推荐使用“全量审计”。
+5. 在“任务清单”查看运行中和已完成任务。
+6. 在“任务详情”中展开问题清单、已审查文件和每个文件的工具调用细节。
+7. 在“规则管理”中查看当前生效规则层级和系统内置规则。
+
+### 规则层级
+
+规则按以下优先级解析，每个文件最终命中 1 条规则后交给 LLM 判断：
+
+| Priority | Source | Path | Status |
+|----------|--------|------|--------|
+| 1 | Custom rule | `--rule <path>` | Only enabled when passed in a review task |
+| 2 | Project rule | `<repoDir>/.opencodereview/rule.json` | Enabled when the repository contains this file |
+| 3 | Global rule | `~/.opencodereview/rule.json` | Enabled when this file exists |
+| 4 | System default | Embedded `system_rules.json` | Always enabled as fallback |
+
+当前默认状态下，自开发系统主要使用第 4 层系统内置规则。
+
+---
+
 ## What is Open Code Review?
 
 Open Code Review is an AI-powered code review CLI tool. It originated as Alibaba Group's internal official AI code review assistant — over the past two years, it has served tens of thousands of developers and identified millions of code defects. After thorough validation at massive scale, we incubated it into an open source project for the community. Simply configure a model endpoint to get started.
