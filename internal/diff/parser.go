@@ -17,8 +17,8 @@ import (
 
 var (
 	diffHeaderRe = regexp.MustCompile(`^diff --git a/(.+?) b/(.+)$`)
-	oldFileRe    = regexp.MustCompile(`^--- a/(.+)$`)
-	newFileRe    = regexp.MustCompile(`^\+\+\+ b/(.+)$`)
+	oldFileRe    = regexp.MustCompile(`^--- (?:a/)?(.+)$`)
+	newFileRe    = regexp.MustCompile(`^\+\+\+ (?:b/)?(.+)$`)
 	binaryRe     = regexp.MustCompile(`Binary files `)
 )
 

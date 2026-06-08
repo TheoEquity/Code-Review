@@ -174,6 +174,14 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 		return opts, fmt.Errorf("--max-git-procs must be a non-negative integer (0 means use default 16)")
 	}
 
+	if opts.concurrency <= 0 {
+		return opts, fmt.Errorf("--concurrency must be a positive integer")
+	}
+
+	if opts.perFileTimeout <= 0 {
+		return opts, fmt.Errorf("--timeout must be a positive integer (minutes)")
+	}
+
 	return opts, nil
 }
 

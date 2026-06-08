@@ -82,7 +82,12 @@ func (fr *FileReader) Read(ctx context.Context, path string) (string, error) {
 
 func (fr *FileReader) readFromDisk(path string) (string, error) {
 	fullPath := filepath.Join(fr.RepoDir, path)
-	content, err := os.ReadFile(fullPath)
+	clean := filepath.Clean(fullPath)
+	repoClean := filepath.Clean(fr.RepoDir)
+	if !strings.HasPrefix(clean, repoClean+string(filepath.Separator)) && clean != repoClean {
+		return "", fmt.Errorf("path %q escapes repository root", path)
+	}
+	content, err := os.ReadFile(clean)
 	if err != nil {
 		return "", fmt.Errorf("read file %q: %w", path, err)
 	}
@@ -90,6 +95,10 @@ func (fr *FileReader) readFromDisk(path string) (string, error) {
 }
 
 func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (string, error) {
+	clean := filepath.Clean(path)
+	if strings.HasPrefix(clean, "..") {
+		return "", fmt.Errorf("path %q escapes repository root", path)
+	}
 	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
 
@@ -166,7 +175,12 @@ func scanLines(r io.Reader, startLine, maxLines int) ([]string, int, error) {
 
 func (fr *FileReader) readLinesFromDisk(path string, startLine, maxLines int) ([]string, int, error) {
 	fullPath := filepath.Join(fr.RepoDir, path)
-	f, err := os.Open(fullPath)
+	clean := filepath.Clean(fullPath)
+	repoClean := filepath.Clean(fr.RepoDir)
+	if !strings.HasPrefix(clean, repoClean+string(filepath.Separator)) && clean != repoClean {
+		return nil, 0, fmt.Errorf("path %q escapes repository root", path)
+	}
+	f, err := os.Open(clean)
 	if err != nil {
 		return nil, 0, fmt.Errorf("read file %q: %w", path, err)
 	}
@@ -176,6 +190,10 @@ func (fr *FileReader) readLinesFromDisk(path string, startLine, maxLines int) ([
 }
 
 func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
+	clean := filepath.Clean(path)
+	if strings.HasPrefix(clean, "..") {
+		return nil, 0, fmt.Errorf("path %q escapes repository root", path)
+	}
 	args := []string{"-c", "core.quotepath=false", "show", fr.Ref + ":" + path}
 
 	var collected []string
