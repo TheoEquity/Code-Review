@@ -262,7 +262,37 @@ func readViewerRepoRegistry() (*viewerRepoRegistry, error) {
 	if reg.Repos == nil {
 		reg.Repos = []viewerRepoEntry{}
 	}
+	reg.Repos = dedupeViewerRepoEntries(reg.Repos)
 	return &reg, nil
+}
+
+func dedupeViewerRepoEntries(entries []viewerRepoEntry) []viewerRepoEntry {
+	seen := make(map[string]int, len(entries))
+	result := make([]viewerRepoEntry, 0, len(entries))
+	for _, entry := range entries {
+		key := encodeRepoPath(entry.LocalPath)
+		if entry.LocalPath == "" {
+			key = encodeViewerRepoName(entry.Name)
+		}
+		if index, ok := seen[key]; ok {
+			if result[index].Name == "" && entry.Name != "" {
+				result[index].Name = entry.Name
+			}
+			if result[index].RemoteURL == "" && entry.RemoteURL != "" {
+				result[index].RemoteURL = entry.RemoteURL
+			}
+			if result[index].Token == "" && entry.Token != "" {
+				result[index].Token = entry.Token
+			}
+			if result[index].FileCount == 0 && entry.FileCount != 0 {
+				result[index].FileCount = entry.FileCount
+			}
+			continue
+		}
+		seen[key] = len(result)
+		result = append(result, entry)
+	}
+	return result
 }
 
 func writeViewerRepoRegistry(reg *viewerRepoRegistry) error {
@@ -572,12 +602,22 @@ func discoverManagedRepos(root string) ([]managedRepo, error) {
 }
 
 func resolveManagedRepo(root, encodedRepo string) (*managedRepo, error) {
+	decodedRepo := strings.TrimSpace(encodedRepo)
+	if decodedRepo == "" {
+		return nil, fmt.Errorf("repo not found")
+	}
+	if strings.Contains(decodedRepo, "/") || strings.Contains(decodedRepo, "\\") {
+		if err := validateLocalGitRepo(decodedRepo); err == nil {
+			item := managedRepoFromPath(root, decodedRepo)
+			return &item, nil
+		}
+	}
 	repos, err := discoverManagedRepos(root)
 	if err != nil {
 		return nil, err
 	}
 	for _, repo := range repos {
-		if repo.EncodedPath == encodedRepo {
+		if repo.EncodedPath == encodedRepo || encodeViewerRepoName(repo.DisplayName) == encodedRepo || repo.RepoPath == decodedRepo {
 			copy := repo
 			return &copy, nil
 		}
@@ -626,8 +666,13 @@ func handleReposAPI(w http.ResponseWriter, _ *http.Request, root string) {
 
 	tokenReg, _ := readRepoTokenRegistry()
 	items := make([]repoListItem, 0, len(reg.Repos))
+	seen := make(map[string]struct{}, len(reg.Repos))
 	for _, entry := range reg.Repos {
 		encoded := encodeRepoPath(entry.LocalPath)
+		if _, ok := seen[encoded]; ok {
+			continue
+		}
+		seen[encoded] = struct{}{}
 		summaries, _ := ListSessions(root, encoded)
 		hasToken := entry.Token != "" || tokenReg.Tokens[encoded] != ""
 		items = append(items, repoListItem{
