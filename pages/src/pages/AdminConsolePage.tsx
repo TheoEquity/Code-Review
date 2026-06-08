@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 
-type MenuKey = 'overview' | 'repositories' | 'newReview' | 'sessions' | 'sessionDetail' | 'rules' | 'settings';
+type MenuKey = 'overview' | 'repositories' | 'newReview' | 'sessions' | 'sessionDetail' | 'reports' | 'rules' | 'settings';
 
 interface RepoItem {
   encodedPath: string;
@@ -73,6 +73,35 @@ interface ReviewIssue {
   suggestionCode: string;
   existingCode: string;
   thinking: string;
+}
+
+interface AuditReport {
+  id: string;
+  encodedRepo: string;
+  repoName: string;
+  sessionID: string;
+  sessionTime: string;
+  generatedAt: string;
+  model: string;
+  issueCount: number;
+  fileCount: number;
+  status: string;
+  content: string;
+  structured?: AuditReportStructured;
+  promptTokens?: number;
+  outputTokens?: number;
+}
+
+interface AuditReportStructured {
+  title: string;
+  executiveSummary: string;
+  riskLevel: string;
+  riskReason: string;
+  categories?: Array<{ name: string; riskLevel: string; count?: number; description: string }>;
+  keyModules?: Array<{ path: string; riskLevel: string; finding: string; suggestion: string }>;
+  topFixes?: Array<{ priority: number; riskLevel: string; title: string; file: string; impact: string; suggestion: string }>;
+  roadmap?: Array<{ phase: string; goal: string; items?: string[] }>;
+  manualReview?: string[];
 }
 
 interface RuleLayer {
@@ -185,6 +214,13 @@ const AdminConsolePage: React.FC = () => {
   const [repoActionMessage, setRepoActionMessage] = useState('');
   const [auditRepoFilter, setAuditRepoFilter] = useState<string>('');
   const [auditDateFilter, setAuditDateFilter] = useState<string>('');
+  const [reports, setReports] = useState<AuditReport[]>([]);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reportRepoFilter, setReportRepoFilter] = useState<string>('');
+  const [reportDateFilter, setReportDateFilter] = useState<string>('');
+  const [expandedReport, setExpandedReport] = useState<string>('');
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [reportMessage, setReportMessage] = useState('');
   const [syncingRepos, setSyncingRepos] = useState<Set<string>>(new Set());
   const [deletingSessions, setDeletingSessions] = useState<Set<string>>(new Set());
 
@@ -194,6 +230,7 @@ const AdminConsolePage: React.FC = () => {
     { key: 'newReview' as MenuKey, icon: 'fa-plus-circle' },
     { key: 'sessions' as MenuKey, icon: 'fa-clock-rotate-left' },
     { key: 'sessionDetail' as MenuKey, icon: 'fa-file-lines' },
+    { key: 'reports' as MenuKey, icon: 'fa-chart-column' },
     { key: 'rules' as MenuKey, icon: 'fa-shield-halved' },
     { key: 'settings' as MenuKey, icon: 'fa-gear' },
   ];
@@ -213,6 +250,134 @@ const AdminConsolePage: React.FC = () => {
     if (normalized === 'completed_with_warnings') return { status: normalized, text: '部分完成', className: 'text-amber-600' };
     if (normalized === 'failed') return { status: normalized, text: '失败', className: 'text-red-600' };
     return { status: normalized, text: '运行中', className: 'text-amber-600' };
+  };
+
+  const getRiskView = (riskLevel?: string) => {
+    const level = (riskLevel || '').toLowerCase();
+    if (level === 'critical') return { text: 'Critical', badge: 'bg-red-100 text-red-700 border-red-200', panel: 'border-red-100 bg-red-50' };
+    if (level === 'high') return { text: 'High', badge: 'bg-orange-100 text-orange-700 border-orange-200', panel: 'border-orange-100 bg-orange-50' };
+    if (level === 'medium') return { text: 'Medium', badge: 'bg-amber-100 text-amber-700 border-amber-200', panel: 'border-amber-100 bg-amber-50' };
+    return { text: riskLevel || 'Low', badge: 'bg-emerald-100 text-emerald-700 border-emerald-200', panel: 'border-emerald-100 bg-emerald-50' };
+  };
+
+  const renderStructuredReport = (structured: AuditReportStructured) => {
+    const risk = getRiskView(structured.riskLevel);
+    return (
+      <div className="mt-4 space-y-4">
+        <div className={`rounded-2xl border p-5 ${risk.panel}`}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-lg font-semibold text-slate-900">{structured.title || '审计综合诊断报告'}</div>
+              <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{structured.executiveSummary}</div>
+            </div>
+            <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${risk.badge}`}>{risk.text}</span>
+          </div>
+          {structured.riskReason && <div className="mt-3 text-sm leading-6 text-slate-600">{structured.riskReason}</div>}
+        </div>
+
+        {structured.categories && structured.categories.length > 0 && (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {structured.categories.map((category, index) => {
+              const categoryRisk = getRiskView(category.riskLevel);
+              return (
+                <div key={`${category.name}-${index}`} className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="font-semibold text-slate-900">{category.name}</div>
+                    <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${categoryRisk.badge}`}>{categoryRisk.text}</span>
+                  </div>
+                  <div className="mt-2 text-sm leading-6 text-slate-600">{category.description}</div>
+                  {category.count ? <div className="mt-3 text-xs text-slate-500">{category.count} 条相关问题</div> : null}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {structured.keyModules && structured.keyModules.length > 0 && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-5">
+            <div className="text-base font-semibold text-slate-900">重点文件或模块</div>
+            <div className="mt-4 space-y-3">
+              {structured.keyModules.map((module, index) => {
+                const moduleRisk = getRiskView(module.riskLevel);
+                return (
+                  <div key={`${module.path}-${index}`} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${moduleRisk.badge}`}>{moduleRisk.text}</span>
+                      <span className="break-all text-sm font-semibold text-slate-900">{module.path}</span>
+                    </div>
+                    <div className="mt-2 text-sm leading-6 text-slate-700">{module.finding}</div>
+                    <div className="mt-2 text-sm leading-6 text-slate-500">建议：{module.suggestion}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {structured.topFixes && structured.topFixes.length > 0 && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-5">
+            <div className="text-base font-semibold text-slate-900">Top 优先修复项</div>
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[900px] text-left text-sm">
+                <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2">优先级</th>
+                    <th className="px-3 py-2">风险</th>
+                    <th className="px-3 py-2">问题</th>
+                    <th className="px-3 py-2">文件</th>
+                    <th className="px-3 py-2">影响</th>
+                    <th className="px-3 py-2">建议</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {structured.topFixes.map((fix, index) => {
+                    const fixRisk = getRiskView(fix.riskLevel);
+                    return (
+                      <tr key={`${fix.title}-${index}`} className="border-b border-slate-100 align-top">
+                        <td className="px-3 py-3 font-semibold text-slate-900">#{fix.priority || index + 1}</td>
+                        <td className="px-3 py-3"><span className={`rounded-full border px-2 py-1 text-xs font-medium ${fixRisk.badge}`}>{fixRisk.text}</span></td>
+                        <td className="px-3 py-3 font-medium text-slate-900">{fix.title}</td>
+                        <td className="px-3 py-3 break-all text-slate-600">{fix.file || '-'}</td>
+                        <td className="px-3 py-3 text-slate-600">{fix.impact}</td>
+                        <td className="px-3 py-3 text-slate-600">{fix.suggestion}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {structured.roadmap && structured.roadmap.length > 0 && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-5">
+            <div className="text-base font-semibold text-slate-900">修复路线</div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              {structured.roadmap.map((phase, index) => (
+                <div key={`${phase.phase}-${index}`} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                  <div className="text-sm font-semibold text-slate-900">{phase.phase}</div>
+                  <div className="mt-1 text-sm text-slate-600">{phase.goal}</div>
+                  {phase.items && phase.items.length > 0 && (
+                    <div className="mt-3 space-y-2 text-sm text-slate-600">
+                      {phase.items.map((item, itemIndex) => <div key={`${item}-${itemIndex}`}>- {item}</div>)}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {structured.manualReview && structured.manualReview.length > 0 && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-5">
+            <div className="text-base font-semibold text-slate-900">需要人工复核的点</div>
+            <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
+              {structured.manualReview.map((item, index) => <div key={`${item}-${index}`} className="rounded-lg bg-slate-50 p-3">{item}</div>)}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const extractReviewIssues = (detail: SessionDetail | null): ReviewIssue[] => {
@@ -276,6 +441,7 @@ const AdminConsolePage: React.FC = () => {
     newReview: '/admin/new-task',
     sessions: '/admin/task-history',
     sessionDetail: '/admin/task-detail',
+    reports: '/admin/reports',
     rules: '/admin/rules',
     settings: '/admin/settings',
   };
@@ -429,6 +595,41 @@ const AdminConsolePage: React.FC = () => {
       window.clearInterval(timer);
     };
   }, [selectedRepo, selectedSession, sessionDetail?.summary.status]);
+
+  useEffect(() => {
+    if (activeMenu !== 'reports') {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadReports = async () => {
+      setReportsLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (reportRepoFilter) params.set('repo', reportRepoFilter);
+        if (reportDateFilter) params.set('date', reportDateFilter);
+        const response = await fetch(`/api/reports${params.toString() ? `?${params.toString()}` : ''}`);
+        const data = await response.json();
+        if (!cancelled) {
+          setReports(Array.isArray(data.reports) ? data.reports : []);
+        }
+      } catch {
+        if (!cancelled) {
+          setReports([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setReportsLoading(false);
+        }
+      }
+    };
+
+    loadReports();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMenu, reportRepoFilter, reportDateFilter]);
 
   useEffect(() => {
     if (activeMenu !== 'rules') {
@@ -601,6 +802,36 @@ const AdminConsolePage: React.FC = () => {
     }
   };
 
+  const handleGenerateReport = async () => {
+    if (!selectedRepo || !selectedSession || !sessionDetail) return;
+    const status = sessionDetail.summary.status;
+    if (status !== 'completed' && status !== 'completed_with_warnings') {
+      setReportMessage(t('admin.reports.completedOnly'));
+      return;
+    }
+    setGeneratingReport(true);
+    setReportMessage('');
+    try {
+      const response = await fetch(`/api/repos/${encodeURIComponent(selectedRepo)}/sessions/${encodeURIComponent(selectedSession)}/report`, {
+        method: 'POST',
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setReportMessage(data.error || t('admin.reports.generateFailed'));
+        return;
+      }
+      setReportMessage(t('admin.reports.generateSuccess'));
+      setReports((prev) => [data, ...prev.filter((item) => item.id !== data.id)]);
+      setExpandedReport(data.id);
+      setActiveMenu('reports');
+      navigate(menuPathMap.reports, { replace: true });
+    } catch {
+      setReportMessage(t('admin.reports.generateFailed'));
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     const loadRepos = async () => {
@@ -626,6 +857,8 @@ const AdminConsolePage: React.FC = () => {
   }, []);
 
   const selectedRepoInfo = repos.find((repo) => repo.encodedPath === selectedRepo);
+  const detailRepoName = sessionDetail?.summary.repoName || selectedRepoInfo?.displayName || selectedRepo || '';
+  const detailRepoPath = sessionDetail?.summary.repoPath || sessionDetail?.summary.cwd || selectedRepoInfo?.repoPath || '';
 
   const statCards = [
     {
@@ -684,6 +917,11 @@ const AdminConsolePage: React.FC = () => {
       description: '',
       cards: [],
     },
+    reports: {
+      title: t('admin.menu.reports'),
+      description: t('admin.section.reportsDesc'),
+      cards: [],
+    },
     rules: {
       title: t('admin.menu.rules'),
       description: t('admin.section.rulesDesc'),
@@ -705,6 +943,9 @@ const AdminConsolePage: React.FC = () => {
   };
 
   const currentSection = sectionContent[activeMenu];
+  const detailPageTitle = activeMenu === 'sessionDetail' && (detailRepoName || detailRepoPath)
+    ? `${detailRepoName || '-'}${detailRepoPath ? ` · ${detailRepoPath}` : ''}`
+    : currentSection.title;
 
   const showStatCards = activeMenu === 'overview';
 
@@ -1206,7 +1447,10 @@ const AdminConsolePage: React.FC = () => {
             >
               &larr; {t('admin.audit.backToList')}
             </button>
-            <div className="text-lg font-semibold text-slate-900">{selectedSession}</div>
+            <div className="min-w-0">
+              <div className="text-lg font-semibold text-slate-900">{detailRepoName || '-'}</div>
+              {detailRepoPath && <div className="mt-1 break-all text-sm text-slate-500">{detailRepoPath}</div>}
+            </div>
           </div>
 
           {sessionDetailLoading && <div className="text-sm text-slate-500">{t('admin.data.loading')}</div>}
@@ -1234,75 +1478,92 @@ const AdminConsolePage: React.FC = () => {
                     <div>{t('admin.data.cacheWriteTokens')}: <span className="text-slate-900">{sessionDetail.tokenUsage.totalCacheWriteTokens ?? 0}</span></div>
                   </div>
                 </div>
+              </div>
 
-                <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold text-slate-900">问题清单</div>
-                      <div className="mt-1 text-xs text-slate-500">从已完成的 code_comment 调用中提取问题与改进建议</div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => {
-                          setShowIssueList(true);
-                          setIssueListExpanded(true);
-                        }}
-                        className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                        disabled={reviewIssues.length === 0}
-                      >
-                        生成问题清单
-                      </button>
-                      <button
-                        onClick={() => {
-                          setShowIssueList(true);
-                          setIssueListExpanded((prev) => !prev);
-                        }}
-                        className="rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm font-medium text-blue-700 hover:border-blue-300"
-                      >
-                        {issueListExpanded ? '收起' : '展开'}
-                      </button>
-                    </div>
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-5 shadow-sm">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-base font-semibold text-slate-900">{t('admin.reports.diagnosisTitle')}</div>
+                    <div className="mt-1 text-sm text-slate-500">{t('admin.reports.diagnosisDesc')}</div>
                   </div>
-                  {showIssueList && issueListExpanded && (
-                    <div className="mt-4 space-y-3">
-                      {reviewIssues.length === 0 ? (
-                        <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-500">当前任务详情中没有可提取的问题。</div>
-                      ) : (
-                        <>
-                          <div className="text-sm text-slate-600">共提取 {reviewIssues.length} 条问题</div>
-                          {reviewIssues.map((issue, index) => (
-                            <div key={`${issue.path}-${index}`} className="rounded-xl border border-slate-200 bg-white p-4">
-                              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                                <span className="rounded-full bg-slate-100 px-2 py-1">#{index + 1}</span>
-                                <span className="break-all font-medium text-slate-700">{issue.path}</span>
-                              </div>
-                              <div className="mt-3 text-sm font-semibold text-slate-900">问题</div>
-                              <div className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{issue.content}</div>
-                              {issue.suggestionCode && (
-                                <>
-                                  <div className="mt-3 text-sm font-semibold text-slate-900">改进建议</div>
-                                  <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs leading-6 text-slate-700">{issue.suggestionCode}</pre>
-                                </>
-                              )}
-                              {issue.existingCode && (
-                                <>
-                                  <div className="mt-3 text-sm font-semibold text-slate-900">相关代码</div>
-                                  <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs leading-6 text-slate-700">{issue.existingCode}</pre>
-                                </>
-                              )}
-                              {issue.thinking && (
-                                <>
-                                  <div className="mt-3 text-sm font-semibold text-slate-900">分析依据</div>
-                                  <div className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-600">{issue.thinking}</div>
-                                </>
-                              )}
-                            </div>
-                          ))}
-                        </>
-                      )}
-                    </div>
-                  )}
+                  <button
+                    onClick={handleGenerateReport}
+                    disabled={generatingReport || (detailStatus.status !== 'completed' && detailStatus.status !== 'completed_with_warnings')}
+                    className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    {generatingReport ? t('admin.reports.generating') : t('admin.reports.generateDiagnosis')}
+                  </button>
+                  {reportMessage && <div className="w-full text-xs text-slate-600">{reportMessage}</div>}
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-blue-100 bg-blue-50 p-5 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-base font-semibold text-slate-900">问题清单</div>
+                    <div className="mt-1 text-sm text-slate-500">从已完成的 code_comment 调用中提取问题与改进建议</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => {
+                        setShowIssueList(true);
+                        setIssueListExpanded(true);
+                      }}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                      disabled={reviewIssues.length === 0}
+                    >
+                      生成问题清单
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowIssueList(true);
+                        setIssueListExpanded((prev) => !prev);
+                      }}
+                      className="rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm font-medium text-blue-700 hover:border-blue-300"
+                    >
+                      {issueListExpanded ? '收起' : '展开'}
+                    </button>
+                  </div>
+                </div>
+                {showIssueList && issueListExpanded && (
+                  <div className="mt-4 space-y-3">
+                    {reviewIssues.length === 0 ? (
+                      <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-500">当前任务详情中没有可提取的问题。</div>
+                    ) : (
+                      <>
+                        <div className="text-sm text-slate-600">共提取 {reviewIssues.length} 条问题</div>
+                        {reviewIssues.map((issue, index) => (
+                          <div key={`${issue.path}-${index}`} className="rounded-xl border border-slate-200 bg-white p-4">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                              <span className="rounded-full bg-slate-100 px-2 py-1">#{index + 1}</span>
+                              <span className="break-all font-medium text-slate-700">{issue.path}</span>
+                            </div>
+                            <div className="mt-3 text-sm font-semibold text-slate-900">问题</div>
+                            <div className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{issue.content}</div>
+                            {issue.suggestionCode && (
+                              <>
+                                <div className="mt-3 text-sm font-semibold text-slate-900">改进建议</div>
+                                <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs leading-6 text-slate-700">{issue.suggestionCode}</pre>
+                              </>
+                            )}
+                            {issue.existingCode && (
+                              <>
+                                <div className="mt-3 text-sm font-semibold text-slate-900">相关代码</div>
+                                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs leading-6 text-slate-700">{issue.existingCode}</pre>
+                              </>
+                            )}
+                            {issue.thinking && (
+                              <>
+                                <div className="mt-3 text-sm font-semibold text-slate-900">分析依据</div>
+                                <div className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-600">{issue.thinking}</div>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               {sessionDetail.files && sessionDetail.files.length > 0 && (
@@ -1376,6 +1637,87 @@ const AdminConsolePage: React.FC = () => {
               )}
             </>
           )}
+        </div>
+      );
+    }
+
+    if (activeMenu === 'reports') {
+      const dateOptions = [...new Set(reports
+        .filter((report) => report.sessionTime && (!reportRepoFilter || report.encodedRepo === reportRepoFilter))
+        .map((report) => report.sessionTime.slice(0, 10))
+      )];
+      dateOptions.sort((a, b) => b.localeCompare(a));
+
+      return (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-sm font-medium text-slate-700">{t('admin.audit.repo')}</label>
+              <select
+                value={reportRepoFilter}
+                onChange={(e) => {
+                  setReportRepoFilter(e.target.value);
+                  setReportDateFilter('');
+                }}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+              >
+                <option value="">{t('admin.audit.allRepos')}</option>
+                {repos.map((r) => (
+                  <option key={r.encodedPath} value={r.encodedPath}>{r.displayName || r.encodedPath}</option>
+                ))}
+              </select>
+
+              <label className="text-sm font-medium text-slate-700">{t('admin.reports.sessionDate')}</label>
+              <select
+                value={reportDateFilter}
+                onChange={(e) => setReportDateFilter(e.target.value)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+              >
+                <option value="">{t('admin.audit.allDates')}</option>
+                {dateOptions.map((date) => (
+                  <option key={date} value={date}>{date}</option>
+                ))}
+              </select>
+
+              <div className="ml-auto text-sm text-slate-500">{reports.length} {t('admin.reports.unit')}</div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {!reportsLoading && reports.map((report) => (
+              <div key={report.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-base font-semibold text-slate-900">{report.repoName || report.encodedRepo}</div>
+                    <div className="mt-1 break-all text-xs text-slate-500">{report.sessionID}</div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                      <span>{t('admin.reports.generatedAt')}: {report.generatedAt ? new Date(report.generatedAt).toLocaleString('zh-CN', { hour12: false }) : '-'}</span>
+                      <span>{t('admin.reports.sessionTime')}: {report.sessionTime ? new Date(report.sessionTime).toLocaleString('zh-CN', { hour12: false }) : '-'}</span>
+                      <span>{report.issueCount} {t('admin.reports.issuesUnit')}</span>
+                      <span>{report.fileCount} {t('admin.audit.table.files')}</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setExpandedReport((prev) => prev === report.id ? '' : report.id)}
+                    className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:border-slate-300 hover:text-slate-900"
+                  >
+                    {expandedReport === report.id ? t('admin.reports.collapse') : t('admin.reports.expand')}
+                  </button>
+                </div>
+                {expandedReport === report.id && (
+                  report.structured ? renderStructuredReport(report.structured) : (
+                    <pre className="mt-4 max-h-[640px] overflow-auto whitespace-pre-wrap rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm leading-7 text-slate-700">{report.content}</pre>
+                  )
+                )}
+              </div>
+            ))}
+            {!reportsLoading && reports.length === 0 && (
+              <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">{t('admin.reports.empty')}</div>
+            )}
+            {reportsLoading && (
+              <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">{t('admin.data.loading')}</div>
+            )}
+          </div>
         </div>
       );
     }
@@ -1698,7 +2040,7 @@ const AdminConsolePage: React.FC = () => {
             <div className="flex flex-col gap-3 px-6 py-4 md:px-8 lg:px-10">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h2 className="text-[28px] font-semibold tracking-tight text-slate-900">{activeMenu === 'sessionDetail' && selectedSession ? selectedSession : currentSection.title}</h2>
+                  <h2 className="text-[28px] font-semibold tracking-tight text-slate-900">{detailPageTitle}</h2>
                   {currentSection.description && <p className="mt-1.5 max-w-3xl text-sm leading-6 text-slate-600">{currentSection.description}</p>}
                 </div>
 

@@ -98,6 +98,19 @@ func StartServer(addr string) error {
 		}
 		handleSessionAPI(w, r, root, repo, sid)
 	})
+	mux.HandleFunc("/api/repos/{repo}/sessions/{sessionID}/report", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		repo := r.PathValue("repo")
+		sid := r.PathValue("sessionID")
+		if !validatePathValue(repo) || !validatePathValue(sid) {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		handleGenerateAuditReportAPI(w, r, root, repo, sid)
+	})
 	mux.HandleFunc("/api/repos/{repo}/status", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -152,6 +165,25 @@ func StartServer(addr string) error {
 			return
 		}
 		handleRulesAPI(w, r, root)
+	})
+	mux.HandleFunc("/api/reports", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleListAuditReportsAPI(w, r, root)
+	})
+	mux.HandleFunc("/api/reports/{reportID}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		reportID := r.PathValue("reportID")
+		if !validatePathValue(reportID) {
+			http.Error(w, "invalid report id", http.StatusBadRequest)
+			return
+		}
+		handleGetAuditReportAPI(w, r, root, reportID)
 	})
 	mux.HandleFunc("/api/branches", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

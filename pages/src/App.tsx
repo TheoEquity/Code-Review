@@ -12,6 +12,7 @@ const App: React.FC = () => {
       <Route path="/admin/new-task" element={<AdminConsolePage />} />
       <Route path="/admin/task-history" element={<AdminConsolePage />} />
       <Route path="/admin/task-detail" element={<AdminConsolePage />} />
+      <Route path="/admin/reports" element={<AdminConsolePage />} />
       <Route path="/admin/rules" element={<AdminConsolePage />} />
       <Route path="/admin/settings" element={<AdminConsolePage />} />
     </Routes>
