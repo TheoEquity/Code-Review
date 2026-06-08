@@ -45,6 +45,44 @@ func stripEmptyPlanBlock(content string) string {
 	return planBlockPattern.ReplaceAllString(content, "")
 }
 
+// templateReplaceOnce substitutes known {{token}} placeholders in a single scan,
+// preventing substituted values that happen to contain another placeholder from
+// being expanded again (injection defense).
+func templateReplaceOnce(content string, replacements map[string]string) string {
+	if len(replacements) == 0 {
+		return content
+	}
+	var sb strings.Builder
+	for len(content) > 0 {
+		// Find the first opening "{{"
+		idx := strings.Index(content, "{{")
+		if idx == -1 {
+			sb.WriteString(content)
+			break
+		}
+		// Find the matching "}}"
+		closeIdx := strings.Index(content[idx:], "}}")
+		if closeIdx == -1 {
+			// No closing "}}" — not a valid token, emit and done
+			sb.WriteString(content)
+			break
+		}
+		// Include the "}}" length to get the full span
+		closeIdx += idx + 2
+		token := content[idx:closeIdx]
+		// Emit everything before the token
+		sb.WriteString(content[:idx])
+		if repl, ok := replacements[token]; ok {
+			sb.WriteString(repl)
+		} else {
+			// Unknown token — emit as-is
+			sb.WriteString(token)
+		}
+		content = content[closeIdx:]
+	}
+	return sb.String()
+}
+
 // Args holds all dependencies and configuration needed to run a review session.
 type Args struct {
 	// RepoDir is the root of the git repository.
@@ -546,25 +584,32 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 
 	rawMsgs := a.args.Template.MainTask.Messages
 	messages := make([]llm.Message, 0, len(rawMsgs))
+
+	// Build a replacement map; keys must be replaced in a single pass
+	// so that substituted values containing other tokens are never expanded again.
+	replacements := map[string]string{
+		"{{current_system_date_time}}":   a.currentDate,
+		"{{system_rule}}":                rule,
+		"{{change_files}}":               changeFilesExcludingCurrent,
+		"{{diff}}":                       d.Diff,
+		"{{requirement_background}}":     a.args.Background,
+		"{{plan_guidance}}":              planResult,
+	}
+
 	for _, m := range rawMsgs {
 		content := m.Content
-		content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
+		// Single pass: split on known tokens to avoid injecting new tokens.
+		content = templateReplaceOnce(content, replacements)
+		// Also handle per-dynamic-path token that varies by file.
 		content = strings.ReplaceAll(content, "{{current_file_path}}", newPath)
-		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
-		content = strings.ReplaceAll(content, "{{change_files}}", changeFilesExcludingCurrent)
-		content = strings.ReplaceAll(content, "{{diff}}", d.Diff)
-		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
-		// Always substitute the {{plan_guidance}} token so the literal placeholder
-		// never leaks into the rendered prompt. When the plan phase produced no
-		// output, strip the surrounding "### Review Plan (Optional)\n…\n\n" wrapper
-		// (any language variant) so the LLM does not see a dangling section header.
-		// Strip MUST run before ReplaceAll: the regex requires the literal
-		// {{plan_guidance}} token to be present; if we replace first, the token
-		// is gone and the wrapper can't be matched.
-		if planResult == "" {
+
+		// When the plan phase produced no output, strip the surrounding
+		// "### Review Plan (Optional)\n…\n\n" wrapper so the LLM does not
+		// see a dangling section header.  Only relevant if the placeholder
+		// was still present (i.e. single-pass did not already consume it).
+		if planResult == "" && strings.Contains(content, "{{plan_guidance}}") {
 			content = stripEmptyPlanBlock(content)
 		}
-		content = strings.ReplaceAll(content, "{{plan_guidance}}", planResult)
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
@@ -711,15 +756,20 @@ func (a *Agent) extFromPath(path string) string {
 func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFiles, rule string) (string, error) {
 	pt := a.args.Template.PlanTask
 	messages := make([]llm.Message, 0, len(pt.Messages))
+
+	planReplacements := map[string]string{
+		"{{current_system_date_time}}": a.currentDate,
+		"{{system_rule}}":              rule,
+		"{{change_files}}":             changeFiles,
+		"{{diff}}":                     rawDiff,
+		"{{requirement_background}}":   a.args.Background,
+		"{{plan_tools}}":               formatToolDefs(a.args.PlanToolDefs),
+	}
+
 	for _, m := range pt.Messages {
 		content := m.Content
-		content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
+		content = templateReplaceOnce(content, planReplacements)
 		content = strings.ReplaceAll(content, "{{current_file_path}}", newPath)
-		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
-		content = strings.ReplaceAll(content, "{{change_files}}", changeFiles)
-		content = strings.ReplaceAll(content, "{{diff}}", rawDiff)
-		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
-		content = strings.ReplaceAll(content, "{{plan_tools}}", formatToolDefs(a.args.PlanToolDefs))
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
