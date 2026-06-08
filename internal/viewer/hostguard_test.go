@@ -53,8 +53,8 @@ func TestBuildAllowedHosts(t *testing.T) {
 			t.Errorf("default allowlist missing %q", h)
 		}
 	}
-	if len(a) != 3 {
-		t.Errorf("default allowlist size = %d, want 3, got %v", len(a), a)
+	if len(a) != 4 {
+		t.Errorf("default allowlist size = %d, want 4, got %v", len(a), a)
 	}
 
 	// Concrete bind host is auto-added
@@ -66,8 +66,8 @@ func TestBuildAllowedHosts(t *testing.T) {
 	// Wildcard bind host is NOT auto-added (forces operator to set env var)
 	for _, bh := range []string{"0.0.0.0", "::", ""} {
 		a = buildAllowedHosts(bh, "")
-		if len(a) != 3 {
-			t.Errorf("wildcard bind %q: allowlist size = %d, want 3 (loopback only)", bh, len(a))
+		if len(a) != 4 {
+			t.Errorf("wildcard bind %q: allowlist size = %d, want 4 (loopback + preview)", bh, len(a))
 		}
 	}
 

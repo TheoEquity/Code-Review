@@ -96,7 +96,7 @@ func (fr *FileReader) readFromDisk(path string) (string, error) {
 
 func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (string, error) {
 	clean := filepath.Clean(path)
-	if strings.HasPrefix(clean, "..") {
+	if strings.HasPrefix(clean, "..") || filepath.IsAbs(path) {
 		return "", fmt.Errorf("path %q escapes repository root", path)
 	}
 	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
@@ -191,7 +191,7 @@ func (fr *FileReader) readLinesFromDisk(path string, startLine, maxLines int) ([
 
 func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
 	clean := filepath.Clean(path)
-	if strings.HasPrefix(clean, "..") {
+	if strings.HasPrefix(clean, "..") || filepath.IsAbs(path) {
 		return nil, 0, fmt.Errorf("path %q escapes repository root", path)
 	}
 	args := []string{"-c", "core.quotepath=false", "show", fr.Ref + ":" + path}

@@ -598,18 +598,18 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 
 	for _, m := range rawMsgs {
 		content := m.Content
+
+		// When the plan phase produced no output, strip the surrounding
+		// "### Review Plan (Optional)\n…\n\n" wrapper BEFORE replacing tokens,
+		// otherwise the placeholder is consumed and the wrapper can't be matched.
+		if planResult == "" {
+			content = stripEmptyPlanBlock(content)
+		}
+
 		// Single pass: split on known tokens to avoid injecting new tokens.
 		content = templateReplaceOnce(content, replacements)
 		// Also handle per-dynamic-path token that varies by file.
 		content = strings.ReplaceAll(content, "{{current_file_path}}", newPath)
-
-		// When the plan phase produced no output, strip the surrounding
-		// "### Review Plan (Optional)\n…\n\n" wrapper so the LLM does not
-		// see a dangling section header.  Only relevant if the placeholder
-		// was still present (i.e. single-pass did not already consume it).
-		if planResult == "" && strings.Contains(content, "{{plan_guidance}}") {
-			content = stripEmptyPlanBlock(content)
-		}
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 

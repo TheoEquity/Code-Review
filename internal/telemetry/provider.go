@@ -34,6 +34,9 @@ var serviceName = "open-code-review"
 // environment variables and optional config file. Returns true when enabled.
 // Safe to call multiple times, even concurrently.
 func Init(ctx context.Context) bool {
+	if initialized {
+		return len(shutdownFuncs) > 0
+	}
 	var res initResult
 	initOnce.Do(func() {
 		res = doInit(ctx)

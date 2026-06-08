@@ -483,7 +483,7 @@ const AdminConsolePage: React.FC = () => {
         if (!cancelled && data.branches) {
           setBranches(data.branches);
           if (!reviewForm.encodedBranch && data.branches.length > 0) {
-            setReviewForm(prev => ({ ...prev, encodedBranch: data.branches[0] }));
+            setReviewForm(prev => ({ ...prev, encodedBranch: data.branches[0], reviewMode: 'branch-diff', targetRef: data.branches[0], baseRef: prev.baseRef || 'main' }));
           }
         }
       } catch {
@@ -1313,7 +1313,7 @@ const AdminConsolePage: React.FC = () => {
                 <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">选择分支</div>
                 <select
                   value={reviewForm.encodedBranch || ''}
-                  onChange={(event) => setReviewForm((prev) => ({ ...prev, encodedBranch: event.target.value }))}
+                  onChange={(event) => setReviewForm((prev) => ({ ...prev, encodedBranch: event.target.value, targetRef: event.target.value || prev.targetRef, reviewMode: event.target.value ? 'branch-diff' : prev.reviewMode }))}
                   disabled={!reviewForm.encodedRepo}
                   className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none disabled:bg-slate-100 disabled:text-slate-400"
                 >
@@ -1336,7 +1336,7 @@ const AdminConsolePage: React.FC = () => {
 
               <label className="block text-sm text-slate-700">
                 <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.review.modeLabel')}</div>
-                <select value={reviewForm.reviewMode} onChange={(event) => setReviewForm((prev) => ({ ...prev, reviewMode: event.target.value }))} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none">
+                <select value={reviewForm.reviewMode} onChange={(event) => setReviewForm((prev) => ({ ...prev, reviewMode: event.target.value, baseRef: event.target.value === 'branch-diff' && !prev.baseRef ? 'main' : prev.baseRef }))} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none">
                   <option value="working-tree">{t('admin.review.modeWorkingTree')}</option>
                   <option value="full">{t('admin.review.modeFull')}</option>
                   <option value="branch-diff">{t('admin.review.modeBranchDiff')}</option>

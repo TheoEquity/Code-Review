@@ -331,7 +331,7 @@ func (p *Provider) filterDiffs(diffs []model.Diff) []model.Diff {
 // ---- Internal helpers ----
 
 func (p *Provider) computeMergeBase(ctx context.Context, from, to string) string {
-	out, err := p.runGit(ctx, "merge-base", "--", from, to)
+	out, err := p.runGit(ctx, "merge-base", from, to)
 	if err != nil {
 		return ""
 	}
