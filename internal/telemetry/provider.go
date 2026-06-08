@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 
 	"go.opentelemetry.io/otel"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -17,24 +18,37 @@ var (
 	meterProvider  *sdkmetric.MeterProvider
 	shutdownFuncs  []func(context.Context) error
 	initialized    bool
+	initOnce       sync.Once
 )
+
+// initResult holds the outcome of a one-time telemetry initialization.
+type initResult struct {
+	ok    bool
+	ready bool
+}
 
 // serviceName holds the name set during Init.
 var serviceName = "open-code-review"
 
 // Init initializes global TracerProvider and MeterProvider based on
 // environment variables and optional config file. Returns true when enabled.
-// Safe to call multiple times.
+// Safe to call multiple times, even concurrently.
 func Init(ctx context.Context) bool {
-	if initialized {
-		return len(shutdownFuncs) > 0
-	}
-	initialized = true
+	var res initResult
+	initOnce.Do(func() {
+		res = doInit(ctx)
+		initialized = true
+	})
+	return res.ready
+}
 
+// doInit performs the actual one-time initialization. Returns ok=true when
+// config was loaded and ready=true when providers were set up.
+func doInit(ctx context.Context) initResult {
 	cfg := ResolveConfig(HomeConfigPath())
 	serviceName = cfg.ServiceName
 	if !cfg.Enabled {
-		return false
+		return initResult{ok: true}
 	}
 
 	res, err := resource.New(ctx,
@@ -55,10 +69,14 @@ func Init(ctx context.Context) bool {
 		initConsoleProviders(res)
 	}
 
-	otel.SetTracerProvider(tracerProvider)
-	otel.SetMeterProvider(meterProvider)
+	if tracerProvider != nil {
+		otel.SetTracerProvider(tracerProvider)
+	}
+	if meterProvider != nil {
+		otel.SetMeterProvider(meterProvider)
+	}
 
-	return len(shutdownFuncs) > 0
+	return initResult{ok: true, ready: len(shutdownFuncs) > 0}
 }
 
 // IsEnabled returns true when telemetry has been initialized with exporters.
