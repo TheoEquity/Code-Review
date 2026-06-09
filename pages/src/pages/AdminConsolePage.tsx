@@ -166,6 +166,52 @@ interface AddRepoResponse extends RepoItem {
   error?: string;
 }
 
+interface AuditTemplate {
+  id: string;
+  name: string;
+  description: string;
+  rulePath: string;
+  icon: string;
+}
+
+const AUDIT_TEMPLATES: AuditTemplate[] = [
+  {
+    id: 'all',
+    name: '全面审计',
+    description: '所有问题类型',
+    rulePath: '',
+    icon: 'fa-list-check',
+  },
+  {
+    id: 'security',
+    name: '安全专项',
+    description: '注入/认证/敏感数据',
+    rulePath: 'rules/security.json',
+    icon: 'fa-shield-halved',
+  },
+  {
+    id: 'quality',
+    name: '代码质量',
+    description: '重复/复杂度/命名',
+    rulePath: 'rules/quality.json',
+    icon: 'fa-code',
+  },
+  {
+    id: 'performance',
+    name: '性能优化',
+    description: '数据库/内存/并发',
+    rulePath: 'rules/performance.json',
+    icon: 'fa-gauge-high',
+  },
+  {
+    id: 'architecture',
+    name: '架构设计',
+    description: '模块边界/依赖/接口',
+    rulePath: 'rules/architecture.json',
+    icon: 'fa-briefcase',
+  },
+];
+
 interface ReviewFormState {
   encodedRepo: string;
   reviewMode: string;
@@ -178,6 +224,7 @@ interface ReviewFormState {
   timeout: string;
   concurrency: string;
   rulePath: string;
+  auditTemplate: string;
 }
 
 const AdminConsolePage: React.FC = () => {
@@ -228,6 +275,7 @@ const AdminConsolePage: React.FC = () => {
     timeout: '10',
     concurrency: '8',
     rulePath: '',
+    auditTemplate: 'all',
   });
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewMessage, setReviewMessage] = useState('');
@@ -840,6 +888,19 @@ const AdminConsolePage: React.FC = () => {
       setReviewMessage(t('admin.review.commitRequired'));
       return;
     }
+    
+    // Apply audit template
+    const template = AUDIT_TEMPLATES.find(t => t.id === reviewForm.auditTemplate);
+    let background = reviewForm.background;
+    let rulePath = reviewForm.rulePath;
+    
+    if (template && template.id !== 'all' && template.id !== 'custom') {
+      rulePath = template.rulePath;
+      if (!background.trim()) {
+        background = `本次审计类型：${template.name}。${template.description}。`;
+      }
+    }
+    
     setReviewSubmitting(true);
     setReviewMessage('');
     try {
@@ -853,11 +914,11 @@ const AdminConsolePage: React.FC = () => {
           baseRef: reviewForm.baseRef,
           targetRef: reviewForm.targetRef,
           commitRef: reviewForm.commitRef,
-          background: reviewForm.background,
+          background,
           format: reviewForm.format,
           timeout: reviewForm.timeout,
           concurrency: reviewForm.concurrency,
-          rulePath: reviewForm.rulePath,
+          rulePath,
         }),
       });
       const data = await response.json();
@@ -1474,11 +1535,34 @@ const AdminConsolePage: React.FC = () => {
               )}
 
               <label className="block text-sm text-slate-700 md:col-span-2">
+                <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.review.template')}</div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {AUDIT_TEMPLATES.map((template) => (
+                    <button
+                      key={template.id}
+                      onClick={() => setReviewForm((prev) => ({ ...prev, auditTemplate: template.id, rulePath: template.id === 'custom' ? prev.rulePath : template.rulePath }))}
+                      className={`rounded-xl border p-4 text-left transition-all ${
+                        reviewForm.auditTemplate === template.id
+                          ? 'border-brand-500 bg-brand-500/10 ring-2 ring-brand-500/30'
+                          : 'border-slate-200 bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <i className={`fa-solid ${template.icon} text-lg text-slate-600`}></i>
+                        <div className="text-sm font-semibold text-slate-900">{t(`admin.review.template${template.id.charAt(0).toUpperCase() + template.id.slice(1)}`)}</div>
+                      </div>
+                      <div className="mt-2 text-xs text-slate-500">{t(`admin.review.template${template.id.charAt(0).toUpperCase() + template.id.slice(1)}Desc`)}</div>
+                    </button>
+                  ))}
+                </div>
+              </label>
+
+              <label className="block text-sm text-slate-700 md:col-span-2">
                 <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">审查背景</div>
                 <textarea
                   value={reviewForm.background}
                   onChange={(event) => setReviewForm((prev) => ({ ...prev, background: event.target.value }))}
-                  placeholder="可选：输入本次审查的业务背景、需求说明或关注重点"
+                  placeholder={t('admin.review.templatePlaceholder')}
                   rows={3}
                   className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none resize-none"
                 />
