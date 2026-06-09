@@ -189,7 +189,7 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 		combined.WriteString(out)
 
 	case ModeCommit:
-		out, err := p.runGit(ctx, "show", "--no-color", "-U"+fmt.Sprint(DiffContextLines), p.commit)
+		out, err := p.runGit(ctx, "show", "--no-color", "-U"+fmt.Sprint(DiffContextLines), p.commit, "--")
 		if err != nil {
 			return nil, fmt.Errorf("git show failed: %w", err)
 		}

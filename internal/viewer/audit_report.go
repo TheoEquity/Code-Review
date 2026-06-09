@@ -287,17 +287,28 @@ func writeAuditReport(root string, report auditReport) error {
 
 func parseStructuredAuditReport(content string) *auditReportStructured {
 	trimmed := strings.TrimSpace(content)
-	trimmed = strings.TrimPrefix(trimmed, "```json")
-	trimmed = strings.TrimPrefix(trimmed, "```")
-	trimmed = strings.TrimSuffix(trimmed, "```")
-	trimmed = strings.TrimSpace(trimmed)
+	// Strip markdown code fences if present
+	if strings.HasPrefix(trimmed, "```") {
+		idx := strings.Index(trimmed, "\n")
+		if idx >= 0 {
+			trimmed = trimmed[idx+1:]
+		} else {
+			trimmed = strings.TrimPrefix(trimmed, "```")
+		}
+		trimmed = strings.TrimSuffix(trimmed, "```")
+		trimmed = strings.TrimSpace(trimmed)
+	}
+
+	// Try to find a valid JSON object by scanning for the first '{'
 	start := strings.Index(trimmed, "{")
-	end := strings.LastIndex(trimmed, "}")
-	if start < 0 || end <= start {
+	if start < 0 {
 		return nil
 	}
+
+	// Use json.Decoder to parse from the first '{'
+	decoder := json.NewDecoder(strings.NewReader(trimmed[start:]))
 	var report auditReportStructured
-	if err := json.Unmarshal([]byte(trimmed[start:end+1]), &report); err != nil {
+	if err := decoder.Decode(&report); err != nil {
 		return nil
 	}
 	if report.Title == "" && report.ExecutiveSummary == "" {

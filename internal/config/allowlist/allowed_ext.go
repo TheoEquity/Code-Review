@@ -27,6 +27,7 @@ package allowedext
 import (
 	_ "embed"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -87,7 +88,7 @@ func IsAllowedExt(ext string) bool {
 //	"**/*.test.{js,ts}"  matches "src/app.test.js", "lib/util.test.ts"
 func IsExcludedPath(path string) bool {
 	excludeOnce.Do(initExclude)
-	lowerPath := strings.ToLower(path)
+	lowerPath := strings.ToLower(filepath.ToSlash(path))
 	for _, pattern := range excludePatterns {
 		if matched, _ := doublestar.Match(pattern, lowerPath); matched {
 			return true
