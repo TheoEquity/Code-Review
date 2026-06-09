@@ -1604,8 +1604,8 @@ const AdminConsolePage: React.FC = () => {
               <div className="rounded-xl border border-blue-100 bg-blue-50 p-5 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="text-base font-semibold text-slate-900">问题清单</div>
-                    <div className="mt-1 text-sm text-slate-500">从已完成的 code_comment 调用中提取问题与改进建议，支持按严重度、分类筛选</div>
+                    <div className="text-base font-semibold text-slate-900">原始审计问题</div>
+                    <div className="mt-1 text-sm text-slate-500">从 code_comment 调用中实时提取的原始底稿，保留审计时的原始状态</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -1618,6 +1618,39 @@ const AdminConsolePage: React.FC = () => {
                   </div>
                 </div>
                 {reportMessage && <div className="mt-2 text-xs text-slate-600">{reportMessage}</div>}
+                {reviewIssues.length > 0 && (
+                  <div className="mt-4 space-y-3">
+                    <div className="text-sm text-slate-600">实提取 {reviewIssues.length} 条问题</div>
+                    {reviewIssues.map((issue, index) => (
+                      <div key={`${issue.path}-${index}`} className="rounded-xl border border-slate-200 bg-white p-4">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                          <span className="rounded-full bg-slate-100 px-2 py-1">#{index + 1}</span>
+                          <span className="break-all font-medium text-slate-700">{issue.path}</span>
+                        </div>
+                        <div className="mt-3 text-sm font-semibold text-slate-900">问题</div>
+                        <div className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{issue.content}</div>
+                        {issue.suggestionCode && (
+                          <>
+                            <div className="mt-3 text-sm font-semibold text-slate-900">改进建议</div>
+                            <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs leading-6 text-slate-700">{issue.suggestionCode}</pre>
+                          </>
+                        )}
+                        {issue.existingCode && (
+                          <>
+                            <div className="mt-3 text-sm font-semibold text-slate-900">相关代码</div>
+                            <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs leading-6 text-slate-700">{issue.existingCode}</pre>
+                          </>
+                        )}
+                        {issue.thinking && (
+                          <>
+                            <div className="mt-3 text-sm font-semibold text-slate-900">分析依据</div>
+                            <div className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-600">{issue.thinking}</div>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {sessionDetail.files && sessionDetail.files.length > 0 && (
