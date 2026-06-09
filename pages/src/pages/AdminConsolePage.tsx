@@ -676,6 +676,10 @@ const AdminConsolePage: React.FC = () => {
         const params = new URLSearchParams();
         if (issueListRepoFilter) params.set('repo', issueListRepoFilter);
         const response = await fetch(`/api/issues${params.toString() ? `?${params.toString()}` : ''}`);
+        if (!response.ok) {
+          if (!cancelled) setIssueLists([]);
+          return;
+        }
         const data = await response.json();
         if (!cancelled) {
           setIssueLists(Array.isArray(data.issueLists) ? data.issueLists : []);
