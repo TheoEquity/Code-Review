@@ -918,15 +918,15 @@ const AdminConsolePage: React.FC = () => {
       const response = await fetch(`/api/repos/${encodeURIComponent(selectedRepo)}/sessions/${encodeURIComponent(selectedSession)}/issues`, {
         method: 'POST',
       });
-      const data = await response.json();
       if (!response.ok) {
-        setReportMessage(data.error || t('admin.issues.generateFailed'));
+        const data = await response.json().catch(() => null);
+        setReportMessage((data && data.error) || t('admin.issues.generateFailed'));
         return;
       }
+      const data = await response.json();
       setReportMessage(t('admin.issues.generateSuccess'));
       setIssueLists((prev) => [data, ...prev.filter((item) => item.id !== data.id)]);
       setSelectedIssueListId(data.id);
-      setActiveMenu('issueLists');
       navigate(menuPathMap.issueLists, { replace: true });
     } catch {
       setReportMessage(t('admin.issues.generateFailed'));
@@ -1624,7 +1624,7 @@ const AdminConsolePage: React.FC = () => {
                 {reportMessage && <div className="mt-2 text-xs text-slate-600">{reportMessage}</div>}
                 {reviewIssues.length > 0 && (
                   <div className="mt-4 space-y-3">
-                    <div className="text-sm text-slate-600">实提取 {reviewIssues.length} 条问题</div>
+                    <div className="text-sm text-slate-600">共提取 {reviewIssues.length} 条问题</div>
                     {reviewIssues.map((issue, index) => (
                       <div key={`${issue.path}-${index}`} className="rounded-xl border border-slate-200 bg-white p-4">
                         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
@@ -1881,11 +1881,11 @@ const AdminConsolePage: React.FC = () => {
               </div>
               <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <div className="text-2xl font-bold text-red-600">{severityCounts.critical || 0}</div>
-                <div className="text-xs text-slate-500">Critical</div>
+                <div className="text-xs text-slate-500">{t('admin.issues.critical')}</div>
               </div>
               <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <div className="text-2xl font-bold text-orange-600">{severityCounts.high || 0}</div>
-                <div className="text-xs text-slate-500">High</div>
+                <div className="text-xs text-slate-500">{t('admin.issues.high')}</div>
               </div>
             </div>
 

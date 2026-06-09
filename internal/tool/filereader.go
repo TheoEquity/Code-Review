@@ -102,11 +102,11 @@ func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (s
 	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
 
-	args := []string{"-c", "core.quotepath=false", "show", fr.Ref + ":" + path}
+	args := []string{"-c", "core.quotepath=false", "show", fr.Ref + ":" + clean}
 	if fr.Runner != nil {
 		output, err := fr.Runner.Output(ctx, fr.RepoDir, args...)
 		if err != nil {
-			return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
+			return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, clean, err)
 		}
 		return string(output), nil
 	}
@@ -115,7 +115,7 @@ func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (s
 	cmd.Dir = fr.RepoDir
 	output, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
+		return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, clean, err)
 	}
 	return string(output), nil
 }
@@ -194,7 +194,7 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 	if strings.HasPrefix(clean, "..") || filepath.IsAbs(path) {
 		return nil, 0, fmt.Errorf("path %q escapes repository root", path)
 	}
-	args := []string{"-c", "core.quotepath=false", "show", fr.Ref + ":" + path}
+	args := []string{"-c", "core.quotepath=false", "show", fr.Ref + ":" + clean}
 
 	var collected []string
 	var totalLines int
@@ -206,7 +206,7 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 			return scanErr
 		}, args...)
 		if err != nil {
-			return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
+			return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, clean, err)
 		}
 		return collected, totalLines, nil
 	}
@@ -215,10 +215,10 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 	cmd.Dir = fr.RepoDir
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
+		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, clean, err)
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
+		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, clean, err)
 	}
 
 	collected, totalLines, scanErr := scanLines(stdoutPipe, startLine, maxLines)
@@ -228,10 +228,10 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 	waitErr := cmd.Wait()
 
 	if scanErr != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, scanErr)
+		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, clean, scanErr)
 	}
 	if waitErr != nil {
-		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, waitErr)
+		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, clean, waitErr)
 	}
 	return collected, totalLines, nil
 }

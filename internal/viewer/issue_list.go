@@ -108,10 +108,14 @@ func handleListIssueListsAPI(w http.ResponseWriter, r *http.Request, root string
 	writeJSON(w, http.StatusOK, map[string]interface{}{"issueLists": filtered})
 }
 
-func handleGetIssueListAPI(w http.ResponseWriter, _ *http.Request, root, issueListID string) {
+func handleGetIssueListAPI(w http.ResponseWriter, _ *http.Request, root, repo, issueListID string) {
 	listData, err := readIssueList(root, issueListID)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if repo != "" && listData.EncodedRepo != repo {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "issue list not found for this repo"})
 		return
 	}
 	writeJSON(w, http.StatusOK, listData)
@@ -185,9 +189,14 @@ func extractReviewIssueItems(vs *ViewSession) []reviewIssueItem {
 	}
 
 	sort.Slice(issues, func(i, j int) bool {
-		// 按严重度排序：Critical > High > Medium > Low
 		order := map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3}
-		oi, oj := order[strings.ToLower(issues[i].Severity)], order[strings.ToLower(issues[j].Severity)]
+		getOrder := func(s string) int {
+			if o, ok := order[strings.ToLower(s)]; ok {
+				return o
+			}
+			return 99
+		}
+		oi, oj := getOrder(issues[i].Severity), getOrder(issues[j].Severity)
 		if oi != oj {
 			return oi < oj
 		}
@@ -286,11 +295,19 @@ func writeIssueList(root string, listData issueListData) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	path := issueListPath(root, listData.ID)
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
 	data, err := json.MarshalIndent(listData, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(issueListPath(root, listData.ID), data, 0o644)
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 func minInt(a, b int) int {

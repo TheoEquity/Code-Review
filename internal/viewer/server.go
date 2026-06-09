@@ -209,7 +209,7 @@ func StartServer(addr string) error {
 				http.Error(w, "invalid path", http.StatusBadRequest)
 				return
 			}
-			handleGetIssueListAPI(w, r, root, sid)
+			handleGetIssueListAPI(w, r, root, repo, sid)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -231,7 +231,7 @@ func StartServer(addr string) error {
 			http.Error(w, "invalid issue list id", http.StatusBadRequest)
 			return
 		}
-		handleGetIssueListAPI(w, r, root, issueListID)
+		handleGetIssueListAPI(w, r, root, "", issueListID)
 	})
 
 	// Routes

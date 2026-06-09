@@ -30,19 +30,18 @@ type initResult struct {
 // serviceName holds the name set during Init.
 var serviceName = "open-code-review"
 
+// cachedResult stores the outcome of Init for safe concurrent reads.
+var cachedResult initResult
+
 // Init initializes global TracerProvider and MeterProvider based on
 // environment variables and optional config file. Returns true when enabled.
 // Safe to call multiple times, even concurrently.
 func Init(ctx context.Context) bool {
-	if initialized {
-		return len(shutdownFuncs) > 0
-	}
-	var res initResult
 	initOnce.Do(func() {
-		res = doInit(ctx)
+		cachedResult = doInit(ctx)
 		initialized = true
 	})
-	return res.ready
+	return cachedResult.ready
 }
 
 // doInit performs the actual one-time initialization. Returns ok=true when
