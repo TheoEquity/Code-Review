@@ -191,6 +191,7 @@ export const en: TranslationKeys = {
   'admin.audit.allDates': 'All Dates',
   'admin.audit.table.sessionId': 'Session ID',
   'admin.audit.table.mode': 'Mode',
+  'admin.audit.table.template': 'Audit Template',
   'admin.audit.table.branch': 'Branch',
   'admin.audit.table.files': 'Files',
   'admin.audit.table.time': 'Time',

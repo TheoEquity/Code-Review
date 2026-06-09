@@ -95,10 +95,12 @@ type ToolResultRecord struct {
 
 // SessionOptions holds optional metadata for a new session.
 type SessionOptions struct {
-	ReviewMode string
-	DiffFrom   string
-	DiffTo     string
-	DiffCommit string
+	ReviewMode   string
+	RulePath     string
+	TemplateName string
+	DiffFrom     string
+	DiffTo       string
+	DiffCommit   string
 }
 
 // New creates a new SessionHistory with the given repo directory.

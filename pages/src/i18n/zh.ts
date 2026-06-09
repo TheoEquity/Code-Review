@@ -192,6 +192,7 @@ export const zh: TranslationKeys = {
   'admin.audit.allDates': '全部',
   'admin.audit.table.sessionId': '会话 ID',
   'admin.audit.table.mode': '任务模式',
+  'admin.audit.table.template': '审计模板',
   'admin.audit.table.branch': '分支',
   'admin.audit.table.files': '文件数',
   'admin.audit.table.repoName': '仓库名',

@@ -24,6 +24,8 @@ interface SessionSummary {
   gitBranch: string;
   model: string;
   reviewMode: string;
+  rulePath?: string;
+  templateName?: string;
   diffFrom: string;
   diffTo: string;
   diffCommit: string;
@@ -893,9 +895,11 @@ const AdminConsolePage: React.FC = () => {
     const template = AUDIT_TEMPLATES.find(t => t.id === reviewForm.auditTemplate);
     let background = reviewForm.background;
     let rulePath = reviewForm.rulePath;
+    let templateName = '';
     
     if (template && template.id !== 'all' && template.id !== 'custom') {
       rulePath = template.rulePath;
+      templateName = template.name;
       if (!background.trim()) {
         background = `本次审计类型：${template.name}。${template.description}。`;
       }
@@ -919,6 +923,7 @@ const AdminConsolePage: React.FC = () => {
           timeout: reviewForm.timeout,
           concurrency: reviewForm.concurrency,
           rulePath,
+          templateName,
         }),
       });
       const data = await response.json();
@@ -2204,6 +2209,7 @@ const AdminConsolePage: React.FC = () => {
                 <tr>
                   <th className="px-4 py-3 whitespace-nowrap">{t('admin.audit.table.time')}</th>
                   <th className="px-4 py-3 whitespace-nowrap">{t('admin.audit.table.repoName')}</th>
+                  <th className="px-4 py-3 whitespace-nowrap">{t('admin.audit.table.template')}</th>
                   <th className="px-4 py-3 whitespace-nowrap">{t('admin.audit.table.branch')}</th>
                   <th className="px-4 py-3 whitespace-nowrap">{t('admin.audit.table.mode')}</th>
                   <th className="px-4 py-3 whitespace-nowrap">{t('admin.audit.table.files')}</th>
@@ -2220,6 +2226,9 @@ const AdminConsolePage: React.FC = () => {
                   const sessionRepo = session.encodedRepo || repos.find((item) => item.repoPath === session.cwd || item.repoPath === session.repoPath)?.encodedPath || '';
                   const deletingKey = `${sessionRepo}:${session.sessionID}`;
                   const deleting = deletingSessions.has(deletingKey);
+                  
+                  // Use templateName directly from session
+                  const auditTemplate = session.templateName || (session.reviewMode === 'full' ? '全面审计' : '自定义');
 
                   return (
                     <tr
@@ -2228,6 +2237,9 @@ const AdminConsolePage: React.FC = () => {
                     >
                       <td className="px-4 py-3 text-slate-900 whitespace-nowrap">{session.timestamp ? new Date(session.timestamp).toLocaleString('zh-CN', { hour12: false }) : '-'}</td>
                       <td className="px-4 py-3 font-medium text-slate-900 whitespace-nowrap">{repoName}</td>
+                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
+                        <span className="inline-flex items-center rounded-md bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700 ring-1 ring-inset ring-brand-700/10">{auditTemplate}</span>
+                      </td>
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{session.gitBranch || '-'}</td>
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{session.reviewMode}</td>
                       <td className="px-4 py-3 text-slate-600">{session.fileCount}</td>

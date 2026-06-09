@@ -146,6 +146,12 @@ type Args struct {
 	// injected into plan and main_task prompts via {{requirement_background}}.
 	Background string
 
+	// RulePath is the path to the custom rule file (e.g., "rules/security.json").
+	RulePath string
+
+	// TemplateName is the audit template name (e.g., "安全专项", "代码质量").
+	TemplateName string
+
 	// Model is the user-configured model name used as fallback when
 	// template phases (plan/memory_compression) don't specify one.
 	Model string
@@ -279,10 +285,12 @@ func New(args Args) *Agent {
 			mode = reviewModeString(args.From, args.To, args.Commit, args.ReviewMode)
 		}
 		args.Session = session.New(args.RepoDir, gitBranch, args.Model, session.SessionOptions{
-			ReviewMode: mode,
-			DiffFrom:   args.From,
-			DiffTo:     args.To,
-			DiffCommit: args.Commit,
+			ReviewMode:   mode,
+			RulePath:     args.RulePath,
+			TemplateName: args.TemplateName,
+			DiffFrom:     args.From,
+			DiffTo:       args.To,
+			DiffCommit:   args.Commit,
 		})
 	}
 	return &Agent{

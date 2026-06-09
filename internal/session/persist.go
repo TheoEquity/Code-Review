@@ -17,31 +17,35 @@ import (
 // $HOME/.opencodereview/sessions/<encoded-repo-path>/<session-id>.jsonl.
 // It is safe for concurrent use by multiple goroutines.
 type jsonlWriter struct {
-	mu         sync.Mutex
-	sessionID  string
-	repoDir    string
-	gitBranch  string
-	model      string
-	reviewMode string
-	diffFrom   string
-	diffTo     string
-	diffCommit string
-	file       *os.File
-	writer     *bufio.Writer
-	lastUUID   string // tracks chain of records via parentUuid
+	mu           sync.Mutex
+	sessionID    string
+	repoDir      string
+	gitBranch    string
+	model        string
+	reviewMode   string
+	rulePath     string
+	templateName string
+	diffFrom     string
+	diffTo       string
+	diffCommit   string
+	file         *os.File
+	writer       *bufio.Writer
+	lastUUID     string // tracks chain of records via parentUuid
 }
 
 // newJSONLWriter creates and opens a new JSONL writer for the given session.
 func newJSONLWriter(sessionID, repoDir, gitBranch, model string, opts SessionOptions) (*jsonlWriter, error) {
 	jw := &jsonlWriter{
-		sessionID:  sessionID,
-		repoDir:    repoDir,
-		gitBranch:  gitBranch,
-		model:      model,
-		reviewMode: opts.ReviewMode,
-		diffFrom:   opts.DiffFrom,
-		diffTo:     opts.DiffTo,
-		diffCommit: opts.DiffCommit,
+		sessionID:    sessionID,
+		repoDir:      repoDir,
+		gitBranch:    gitBranch,
+		model:        model,
+		reviewMode:   opts.ReviewMode,
+		rulePath:     opts.RulePath,
+		templateName: opts.TemplateName,
+		diffFrom:     opts.DiffFrom,
+		diffTo:       opts.DiffTo,
+		diffCommit:   opts.DiffCommit,
 	}
 	if err := jw.open(); err != nil {
 		return nil, err
@@ -125,17 +129,21 @@ func (jw *jsonlWriter) writeRecordLocked(rec map[string]any) {
 func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	uuid := generateUUID()
 	rec := map[string]any{
-		"uuid":       uuid,
-		"parentUuid": nil,
-		"type":       "session_start",
-		"sessionId":  jw.sessionID,
-		"timestamp":  startTime.UTC().Format(time.RFC3339),
-		"cwd":        jw.repoDir,
-		"gitBranch":  jw.gitBranch,
-		"model":      jw.model,
+		"uuid":         uuid,
+		"parentUuid":   nil,
+		"type":         "session_start",
+		"sessionId":    jw.sessionID,
+		"timestamp":    startTime.UTC().Format(time.RFC3339),
+		"cwd":          jw.repoDir,
+		"gitBranch":    jw.gitBranch,
+		"model":        jw.model,
+		"templateName": jw.templateName,
 	}
 	if jw.reviewMode != "" {
 		rec["reviewMode"] = jw.reviewMode
+	}
+	if jw.rulePath != "" {
+		rec["rulePath"] = jw.rulePath
 	}
 	if jw.diffFrom != "" {
 		rec["diffFrom"] = jw.diffFrom

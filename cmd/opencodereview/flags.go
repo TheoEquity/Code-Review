@@ -103,6 +103,7 @@ type reviewOptions struct {
 	outputFormat   string
 	audience       string // --audience: "human" (default) or "agent"
 	background     string // --background: optional requirement context
+	template       string // --template: audit template name
 	concurrency    int
 	perFileTimeout int
 	maxTools       int
@@ -128,6 +129,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.IntVar(&opts.perFileTimeout, "timeout", 10, "concurrent task timeout in minutes")
 	a.StringVar(&opts.audience, "audience", "human", "output audience: human (show progress) or agent (summary only)")
 	a.StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the review")
+	a.StringVar(&opts.template, "template", "", "audit template name (e.g., 安全专项，代码质量)")
 	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file; only takes effect when greater than template default")
 	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	a.BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be reviewed without running the LLM")

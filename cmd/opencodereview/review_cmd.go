@@ -124,6 +124,8 @@ func runReview(args []string) error {
 		ConcurrentTaskTimeout: opts.perFileTimeout,
 		Model:                 model,
 		Background:            opts.background,
+		RulePath:              opts.rulePath,
+		TemplateName:          opts.template,
 		GitRunner:             gitRunner,
 	})
 
@@ -227,6 +229,8 @@ func runPreview(repoDir string, opts reviewOptions, fileFilter *rules.FileFilter
 		ReviewMode: reviewModeFromOptions(opts),
 		FileFilter: fileFilter,
 		GitRunner:  gitRunner,
+		RulePath:   opts.rulePath,
+		TemplateName: opts.template,
 	})
 
 	preview, err := ag.Preview(context.Background())

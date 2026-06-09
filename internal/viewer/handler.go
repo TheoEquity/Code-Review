@@ -108,6 +108,7 @@ type reviewTaskResponse struct {
 	Timeout      string    `json:"timeout,omitempty"`
 	Concurrency  string    `json:"concurrency,omitempty"`
 	RulePath     string    `json:"rulePath,omitempty"`
+	TemplateName string    `json:"templateName,omitempty"`
 	Status       string    `json:"status"`
 	StartedAt    time.Time `json:"startedAt"`
 	FinishedAt   time.Time `json:"finishedAt,omitempty"`
@@ -128,6 +129,7 @@ type createReviewTaskRequest struct {
 	Timeout       string `json:"timeout"`
 	Concurrency   string `json:"concurrency"`
 	RulePath      string `json:"rulePath"`
+	TemplateName  string `json:"templateName"`
 }
 
 type addRepoRequest struct {
@@ -1608,6 +1610,9 @@ func launchReviewTask(task *reviewTaskResponse) {
 	if task.Background != "" {
 		args = append(args, "--background", task.Background)
 	}
+	if task.TemplateName != "" {
+		args = append(args, "--template", task.TemplateName)
+	}
 	if task.Format != "" && task.Format != "text" {
 		args = append(args, "--format", task.Format)
 	}
@@ -1681,6 +1686,7 @@ func handleCreateReviewTaskAPI(w http.ResponseWriter, r *http.Request, root stri
 		Timeout:     req.Timeout,
 		Concurrency: req.Concurrency,
 		RulePath:    req.RulePath,
+		TemplateName: req.TemplateName,
 		Status:      "running",
 		StartedAt:   time.Now(),
 	}

@@ -84,6 +84,8 @@ type SessionSummary struct {
 	GitBranch     string    `json:"gitBranch"`
 	Model         string    `json:"model"`
 	ReviewMode    string    `json:"reviewMode"`
+	RulePath      string    `json:"rulePath,omitempty"`
+	TemplateName  string    `json:"templateName,omitempty"`
 	DiffFrom      string    `json:"diffFrom"`
 	DiffTo        string    `json:"diffTo"`
 	DiffCommit    string    `json:"diffCommit"`
@@ -168,6 +170,12 @@ func peekSession(path string) (SessionSummary, error) {
 			}
 			if rm, ok := rec["reviewMode"].(string); ok {
 				summary.ReviewMode = rm
+			}
+			if rp, ok := rec["rulePath"].(string); ok {
+				summary.RulePath = rp
+			}
+			if tn, ok := rec["templateName"].(string); ok {
+				summary.TemplateName = tn
 			}
 			if v, ok := rec["diffFrom"].(string); ok {
 				summary.DiffFrom = v
@@ -352,6 +360,12 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			}
 			if rm, ok := rec["reviewMode"].(string); ok {
 				vs.Summary.ReviewMode = rm
+			}
+			if rp, ok := rec["rulePath"].(string); ok {
+				vs.Summary.RulePath = rp
+			}
+			if tn, ok := rec["templateName"].(string); ok {
+				vs.Summary.TemplateName = tn
 			}
 			if v, ok := rec["diffFrom"].(string); ok {
 				vs.Summary.DiffFrom = v
