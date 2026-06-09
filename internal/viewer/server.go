@@ -192,6 +192,47 @@ func StartServer(addr string) error {
 		}
 		handleListBranchesAPI(w, r, root)
 	})
+	mux.HandleFunc("/api/repos/{repo}/sessions/{sessionID}/issues", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			repo := r.PathValue("repo")
+			sid := r.PathValue("sessionID")
+			if !validatePathValue(repo) || !validatePathValue(sid) {
+				http.Error(w, "invalid path", http.StatusBadRequest)
+				return
+			}
+			handleGenerateIssueListAPI(w, r, root, repo, sid)
+		case http.MethodGet:
+			repo := r.PathValue("repo")
+			sid := r.PathValue("sessionID")
+			if !validatePathValue(repo) || !validatePathValue(sid) {
+				http.Error(w, "invalid path", http.StatusBadRequest)
+				return
+			}
+			handleGetIssueListAPI(w, r, root, sid)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/issues", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleListIssueListsAPI(w, r, root)
+	})
+	mux.HandleFunc("/api/issues/{issueListID}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		issueListID := r.PathValue("issueListID")
+		if !validatePathValue(issueListID) {
+			http.Error(w, "invalid issue list id", http.StatusBadRequest)
+			return
+		}
+		handleGetIssueListAPI(w, r, root, issueListID)
+	})
 
 	// Routes
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

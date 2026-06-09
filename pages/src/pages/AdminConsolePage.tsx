@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 
-type MenuKey = 'overview' | 'repositories' | 'newReview' | 'sessions' | 'sessionDetail' | 'reports' | 'rules' | 'settings';
+type MenuKey = 'overview' | 'repositories' | 'newReview' | 'sessions' | 'sessionDetail' | 'reports' | 'issueLists' | 'rules' | 'settings';
 
 interface RepoItem {
   encodedPath: string;
@@ -118,6 +118,29 @@ interface RuleLayer {
   pathRules?: Array<{ pattern: string; rule: string }>;
 }
 
+interface IssueListItem {
+  path: string;
+  content: string;
+  severity: string;
+  category: string;
+  suggestion?: string;
+  existingCode?: string;
+  lineStart?: number;
+  lineEnd?: number;
+}
+
+interface IssueListData {
+  id: string;
+  encodedRepo: string;
+  repoName: string;
+  sessionID: string;
+  sessionTime: string;
+  generatedAt: string;
+  model: string;
+  issues: IssueListItem[];
+  fileCount: number;
+}
+
 interface ReviewTask {
   taskID: string;
   encodedRepo: string;
@@ -221,6 +244,13 @@ const AdminConsolePage: React.FC = () => {
   const [expandedReport, setExpandedReport] = useState<string>('');
   const [generatingReport, setGeneratingReport] = useState(false);
   const [reportMessage, setReportMessage] = useState('');
+  const [issueLists, setIssueLists] = useState<IssueListData[]>([]);
+  const [issueListsLoading, setIssueListsLoading] = useState(false);
+  const [issueListRepoFilter, setIssueListRepoFilter] = useState<string>('');
+  const [issueListFileFilter, setIssueListFileFilter] = useState<string>('');
+  const [issueListSeverityFilter, setIssueListSeverityFilter] = useState<string>('');
+  const [issueListCategoryFilter, setIssueListCategoryFilter] = useState<string>('');
+  const [selectedIssueListId, setSelectedIssueListId] = useState<string>('');
   const [syncingRepos, setSyncingRepos] = useState<Set<string>>(new Set());
   const [deletingSessions, setDeletingSessions] = useState<Set<string>>(new Set());
 
@@ -231,6 +261,7 @@ const AdminConsolePage: React.FC = () => {
     { key: 'sessions' as MenuKey, icon: 'fa-clock-rotate-left' },
     { key: 'sessionDetail' as MenuKey, icon: 'fa-file-lines' },
     { key: 'reports' as MenuKey, icon: 'fa-chart-column' },
+    { key: 'issueLists' as MenuKey, icon: 'fa-list-check' },
     { key: 'rules' as MenuKey, icon: 'fa-shield-halved' },
     { key: 'settings' as MenuKey, icon: 'fa-gear' },
   ];
@@ -442,6 +473,7 @@ const AdminConsolePage: React.FC = () => {
     sessions: '/admin/task-history',
     sessionDetail: '/admin/task-detail',
     reports: '/admin/reports',
+    issueLists: '/admin/issues',
     rules: '/admin/rules',
     settings: '/admin/settings',
   };
@@ -630,6 +662,43 @@ const AdminConsolePage: React.FC = () => {
       cancelled = true;
     };
   }, [activeMenu, reportRepoFilter, reportDateFilter]);
+
+  useEffect(() => {
+    if (activeMenu !== 'issueLists') {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadIssueLists = async () => {
+      setIssueListsLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (issueListRepoFilter) params.set('repo', issueListRepoFilter);
+        const response = await fetch(`/api/issues${params.toString() ? `?${params.toString()}` : ''}`);
+        const data = await response.json();
+        if (!cancelled) {
+          setIssueLists(Array.isArray(data.issueLists) ? data.issueLists : []);
+          if (!selectedIssueListId && data.issueLists?.length > 0) {
+            setSelectedIssueListId(data.issueLists[0].id);
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setIssueLists([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIssueListsLoading(false);
+        }
+      }
+    };
+
+    loadIssueLists();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMenu, issueListRepoFilter]);
 
   useEffect(() => {
     if (activeMenu !== 'rules') {
@@ -832,6 +901,36 @@ const AdminConsolePage: React.FC = () => {
     }
   };
 
+  const handleGenerateIssueList = async () => {
+    if (!selectedRepo || !selectedSession || !sessionDetail) return;
+    const status = sessionDetail.summary.status;
+    if (status !== 'completed' && status !== 'completed_with_warnings') {
+      setReportMessage(t('admin.issues.completedOnly'));
+      return;
+    }
+    setGeneratingReport(true);
+    setReportMessage('');
+    try {
+      const response = await fetch(`/api/repos/${encodeURIComponent(selectedRepo)}/sessions/${encodeURIComponent(selectedSession)}/issues`, {
+        method: 'POST',
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setReportMessage(data.error || t('admin.issues.generateFailed'));
+        return;
+      }
+      setReportMessage(t('admin.issues.generateSuccess'));
+      setIssueLists((prev) => [data, ...prev.filter((item) => item.id !== data.id)]);
+      setSelectedIssueListId(data.id);
+      setActiveMenu('issueLists');
+      navigate(menuPathMap.issueLists, { replace: true });
+    } catch {
+      setReportMessage(t('admin.issues.generateFailed'));
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     const loadRepos = async () => {
@@ -920,6 +1019,11 @@ const AdminConsolePage: React.FC = () => {
     reports: {
       title: t('admin.menu.reports'),
       description: t('admin.section.reportsDesc'),
+      cards: [],
+    },
+    issueLists: {
+      title: t('admin.menu.issueLists'),
+      description: t('admin.section.issueListsDesc'),
       cards: [],
     },
     rules: {
@@ -1501,69 +1605,19 @@ const AdminConsolePage: React.FC = () => {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <div className="text-base font-semibold text-slate-900">问题清单</div>
-                    <div className="mt-1 text-sm text-slate-500">从已完成的 code_comment 调用中提取问题与改进建议</div>
+                    <div className="mt-1 text-sm text-slate-500">从已完成的 code_comment 调用中提取问题与改进建议，支持按严重度、分类筛选</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
-                      onClick={() => {
-                        setShowIssueList(true);
-                        setIssueListExpanded(true);
-                      }}
+                      onClick={handleGenerateIssueList}
+                      disabled={generatingReport || (detailStatus.status !== 'completed' && detailStatus.status !== 'completed_with_warnings')}
                       className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                      disabled={reviewIssues.length === 0}
                     >
-                      生成问题清单
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowIssueList(true);
-                        setIssueListExpanded((prev) => !prev);
-                      }}
-                      className="rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm font-medium text-blue-700 hover:border-blue-300"
-                    >
-                      {issueListExpanded ? '收起' : '展开'}
+                      {generatingReport ? t('admin.issues.generating') : t('admin.issues.generateBtn')}
                     </button>
                   </div>
                 </div>
-                {showIssueList && issueListExpanded && (
-                  <div className="mt-4 space-y-3">
-                    {reviewIssues.length === 0 ? (
-                      <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-500">当前任务详情中没有可提取的问题。</div>
-                    ) : (
-                      <>
-                        <div className="text-sm text-slate-600">共提取 {reviewIssues.length} 条问题</div>
-                        {reviewIssues.map((issue, index) => (
-                          <div key={`${issue.path}-${index}`} className="rounded-xl border border-slate-200 bg-white p-4">
-                            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                              <span className="rounded-full bg-slate-100 px-2 py-1">#{index + 1}</span>
-                              <span className="break-all font-medium text-slate-700">{issue.path}</span>
-                            </div>
-                            <div className="mt-3 text-sm font-semibold text-slate-900">问题</div>
-                            <div className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{issue.content}</div>
-                            {issue.suggestionCode && (
-                              <>
-                                <div className="mt-3 text-sm font-semibold text-slate-900">改进建议</div>
-                                <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs leading-6 text-slate-700">{issue.suggestionCode}</pre>
-                              </>
-                            )}
-                            {issue.existingCode && (
-                              <>
-                                <div className="mt-3 text-sm font-semibold text-slate-900">相关代码</div>
-                                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs leading-6 text-slate-700">{issue.existingCode}</pre>
-                              </>
-                            )}
-                            {issue.thinking && (
-                              <>
-                                <div className="mt-3 text-sm font-semibold text-slate-900">分析依据</div>
-                                <div className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-600">{issue.thinking}</div>
-                              </>
-                            )}
-                          </div>
-                        ))}
-                      </>
-                    )}
-                  </div>
-                )}
+                {reportMessage && <div className="mt-2 text-xs text-slate-600">{reportMessage}</div>}
               </div>
 
               {sessionDetail.files && sessionDetail.files.length > 0 && (
@@ -1715,6 +1769,257 @@ const AdminConsolePage: React.FC = () => {
               <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">{t('admin.reports.empty')}</div>
             )}
             {reportsLoading && (
+              <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">{t('admin.data.loading')}</div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (activeMenu === 'issueLists') {
+      // 如果选中了具体清单，显示详情
+      const selectedList = issueLists.find((l) => l.id === selectedIssueListId);
+      if (selectedList) {
+        // 收集所有文件和类别用于筛选
+        const allFiles = [...new Set(selectedList.issues.map((i) => i.path))].sort();
+        const allCategories = [...new Set(selectedList.issues.map((i) => i.category))].sort();
+        const filteredIssues = selectedList.issues.filter((issue) => {
+          if (issueListFileFilter && issue.path !== issueListFileFilter) return false;
+          if (issueListSeverityFilter && issue.severity !== issueListSeverityFilter) return false;
+          if (issueListCategoryFilter && issue.category !== issueListCategoryFilter) return false;
+          return true;
+        });
+
+        // 统计
+        const severityCounts: Record<string, number> = {};
+        const categoryCounts: Record<string, number> = {};
+        selectedList.issues.forEach((issue) => {
+          severityCounts[issue.severity] = (severityCounts[issue.severity] || 0) + 1;
+          categoryCounts[issue.category] = (categoryCounts[issue.category] || 0) + 1;
+        });
+
+        const severityBadgeClass: Record<string, string> = {
+          critical: 'bg-red-100 text-red-700 border-red-200',
+          high: 'bg-orange-100 text-orange-700 border-orange-200',
+          medium: 'bg-amber-100 text-amber-700 border-amber-200',
+          low: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+        };
+
+        return (
+          <div className="space-y-4">
+            {/* 返回按钮 + 头部 */}
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => setSelectedIssueListId('')}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 hover:border-slate-300"
+              >
+                {t('admin.issues.backToList')}
+              </button>
+              <div className="text-lg font-semibold text-slate-900">{selectedList.repoName}</div>
+              <span className="text-xs text-slate-500">{selectedList.sessionID}</span>
+              <button
+                onClick={() => {
+                  setSelectedIssueListId('');
+                  setActiveMenu('sessionDetail');
+                  const params = new URLSearchParams();
+                  params.set('repo', selectedList.encodedRepo);
+                  params.set('session', selectedList.sessionID);
+                  navigate(`/admin/task-detail?${params.toString()}`, { replace: true });
+                }}
+                className="ml-auto rounded-lg bg-blue-50 border border-blue-200 px-3 py-1.5 text-sm text-blue-700 hover:border-blue-300"
+              >
+                {t('admin.issues.seeInSession')}
+              </button>
+            </div>
+
+            {/* 统计卡片 */}
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="text-2xl font-bold text-slate-900">{selectedList.issues.length}</div>
+                <div className="text-xs text-slate-500">{t('admin.issues.totalIssues')}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="text-2xl font-bold text-slate-900">{selectedList.fileCount}</div>
+                <div className="text-xs text-slate-500">{t('admin.issues.totalFiles')}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="text-2xl font-bold text-red-600">{severityCounts.critical || 0}</div>
+                <div className="text-xs text-slate-500">Critical</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="text-2xl font-bold text-orange-600">{severityCounts.high || 0}</div>
+                <div className="text-xs text-slate-500">High</div>
+              </div>
+            </div>
+
+            {/* 筛选器 */}
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="text-sm font-medium text-slate-700">{t('admin.issues.filterFile')}</label>
+                <select
+                  value={issueListFileFilter}
+                  onChange={(e) => setIssueListFileFilter(e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+                >
+                  <option value="">{t('admin.issues.allFiles')}</option>
+                  {allFiles.map((f) => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+
+                <label className="text-sm font-medium text-slate-700">{t('admin.issues.filterSeverity')}</label>
+                <select
+                  value={issueListSeverityFilter}
+                  onChange={(e) => setIssueListSeverityFilter(e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+                >
+                  <option value="">{t('admin.issues.allSeverities')}</option>
+                  <option value="critical">{t('admin.issues.critical')}</option>
+                  <option value="high">{t('admin.issues.high')}</option>
+                  <option value="medium">{t('admin.issues.medium')}</option>
+                  <option value="low">{t('admin.issues.low')}</option>
+                </select>
+
+                <label className="text-sm font-medium text-slate-700">{t('admin.issues.filterCategory')}</label>
+                <select
+                  value={issueListCategoryFilter}
+                  onChange={(e) => setIssueListCategoryFilter(e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+                >
+                  <option value="">{t('admin.issues.allCategories')}</option>
+                  {allCategories.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+
+                <div className="ml-auto text-sm text-slate-500">
+                  {filteredIssues.length}/{selectedList.issues.length} {t('admin.issues.totalIssues')}
+                </div>
+              </div>
+            </div>
+
+            {/* 类别分布 */}
+            {Object.keys(categoryCounts).length > 0 && (
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="text-sm font-semibold text-slate-900 mb-2">类别分布</div>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(categoryCounts).sort((a, b) => b[1] - a[1]).map(([cat, count]) => (
+                    <span key={cat} className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">
+                      {cat} ({count})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 问题列表 */}
+            <div className="space-y-3">
+              {filteredIssues.map((issue, index) => (
+                <div key={`${issue.path}-${index}`} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
+                      {t('admin.issues.issueNo')}{index + 1}
+                    </span>
+                    <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${severityBadgeClass[issue.severity] || 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                      {issue.severity}
+                    </span>
+                    <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700">{issue.category}</span>
+                    <span className="break-all text-xs text-slate-500">{issue.path}</span>
+                    {issue.lineStart && issue.lineStart > 0 && (
+                      <span className="text-xs text-slate-400">L{issue.lineStart}{issue.lineEnd ? `-L${issue.lineEnd}` : ''}</span>
+                    )}
+                  </div>
+                  <div className="mt-3 text-sm text-slate-800">{issue.content}</div>
+                  {issue.suggestion && (
+                    <div className="mt-2">
+                      <div className="text-xs font-semibold text-slate-900">{t('admin.issues.suggestion')}</div>
+                      <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs leading-6 text-slate-700">{issue.suggestion}</pre>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {filteredIssues.length === 0 && (
+                <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">没有匹配筛选条件的问题。</div>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      // 清单列表页
+      const repoOptions = [...new Set(issueLists.map((l) => l.encodedRepo))].sort();
+
+      return (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-sm font-medium text-slate-700">{t('admin.issues.filterRepo')}</label>
+              <select
+                value={issueListRepoFilter}
+                onChange={(e) => setIssueListRepoFilter(e.target.value)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+              >
+                <option value="">{t('admin.issues.allRepos')}</option>
+                {repoOptions.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+              <div className="ml-auto text-sm text-slate-500">
+                {issueLists.length} {t('admin.issues.totalIssues')}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {!issueListsLoading && issueLists.map((list) => {
+              const severityStats: Record<string, number> = {};
+              list.issues.forEach((issue) => {
+                severityStats[issue.severity] = (severityStats[issue.severity] || 0) + 1;
+              });
+              return (
+                <div
+                  key={list.id}
+                  className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-slate-300 cursor-pointer transition-colors"
+                  onClick={() => setSelectedIssueListId(list.id)}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="text-base font-semibold text-slate-900">{list.repoName || list.encodedRepo}</div>
+                      <div className="mt-1 break-all text-xs text-slate-500">{list.sessionID}</div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                        <span>{t('admin.issues.generatedAt')}: {list.generatedAt ? new Date(list.generatedAt).toLocaleString('zh-CN', { hour12: false }) : '-'}</span>
+                        <span>{list.issues.length} {t('admin.issues.totalIssues')}</span>
+                        <span>{list.fileCount} {t('admin.issues.totalFiles')}</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                        {(severityStats.critical || 0) > 0 && (
+                          <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">Critical: {severityStats.critical}</span>
+                        )}
+                        {(severityStats.high || 0) > 0 && (
+                          <span className="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700">High: {severityStats.high}</span>
+                        )}
+                        {(severityStats.medium || 0) > 0 && (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">Medium: {severityStats.medium}</span>
+                        )}
+                        {(severityStats.low || 0) > 0 && (
+                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">Low: {severityStats.low}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700">
+                      {t('admin.issues.viewDetail')}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {!issueListsLoading && issueLists.length === 0 && (
+              <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
+                {t('admin.issues.empty')}
+                <div className="mt-2 text-xs text-slate-400">{t('admin.issues.emptyHint')}</div>
+              </div>
+            )}
+            {issueListsLoading && (
               <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">{t('admin.data.loading')}</div>
             )}
           </div>
