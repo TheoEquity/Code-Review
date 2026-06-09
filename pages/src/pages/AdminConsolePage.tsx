@@ -1604,7 +1604,7 @@ const AdminConsolePage: React.FC = () => {
               <div className="rounded-xl border border-blue-100 bg-blue-50 p-5 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="text-base font-semibold text-slate-900">原始审计问题</div>
+                    <div className="text-base font-semibold text-slate-900">审计底稿</div>
                     <div className="mt-1 text-sm text-slate-500">从 code_comment 调用中实时提取的原始底稿，保留审计时的原始状态</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
