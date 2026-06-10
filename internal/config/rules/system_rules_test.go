@@ -424,7 +424,7 @@ func TestNewResolver_FileFilterMerged(t *testing.T) {
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	projJSON := `{"rules":[],"include":["src/**/*.java"],"exclude":["**/generated/**"],"fileHints":["auth"],"maxFiles":20}`
+	projJSON := `{"rules":[],"include":["src/**/*.java"],"exclude":["**/generated/**"],"fileHints":["auth"],"skipHints":["docs"],"minHintScore":2,"maxFiles":20}`
 	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(projJSON), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -447,6 +447,12 @@ func TestNewResolver_FileFilterMerged(t *testing.T) {
 	}
 	if filter.FileHintScore("src/auth/login.java") == 0 {
 		t.Error("expected src/auth/login.java to match file hints")
+	}
+	if !filter.HasSkipHints() || filter.SkipHintScore("src/docs/login.java") == 0 {
+		t.Error("expected src/docs/login.java to match skip hints")
+	}
+	if filter.MinHintScore != 2 {
+		t.Errorf("expected MinHintScore 2, got %d", filter.MinHintScore)
 	}
 	if filter.MaxFiles != 20 {
 		t.Errorf("expected MaxFiles 20, got %d", filter.MaxFiles)

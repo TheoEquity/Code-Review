@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	rules "github.com/open-code-review/open-code-review/internal/config/rules"
 	"github.com/open-code-review/open-code-review/internal/model"
 )
 
@@ -110,6 +111,45 @@ func TestBuildLightFileIndexDoesNotReadSymlinkTarget(t *testing.T) {
 	entry := index["internal/linked.go"]
 	if strings.Contains(entry.Summary, "OutsideSecret") || len(entry.HintMatches) != 0 {
 		t.Fatalf("expected symlink target to be ignored, got %#v", entry)
+	}
+}
+
+func TestFilterByTemplateHintsUsesMinScoreAndSkipHints(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	files := map[string]string{
+		"internal/auth/token.go":         "package auth\n\nfunc ValidateToken() {}\n",
+		"internal/auth/readme_helper.go": "package auth\n\nfunc ValidateDocs() {}\n",
+		"internal/http/handler.go":       "package http\n\nfunc Handle() {}\n",
+	}
+	for path, content := range files {
+		fullPath := filepath.Join(repoDir, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	agent := &Agent{args: Args{
+		RepoDir: repoDir,
+		FileFilter: &rules.FileFilter{
+			FileHints:    []string{"auth", "token"},
+			SkipHints:    []string{"readme"},
+			MinHintScore: 2,
+			MaxFiles:     10,
+		},
+	}}
+	diffs := []model.Diff{
+		{NewPath: "internal/auth/token.go"},
+		{NewPath: "internal/auth/readme_helper.go"},
+		{NewPath: "internal/http/handler.go"},
+	}
+
+	got := agent.filterByTemplateHints(diffs)
+	if len(got) != 1 || got[0].NewPath != "internal/auth/token.go" {
+		t.Fatalf("expected only high-signal auth token file, got %#v", got)
 	}
 }
 

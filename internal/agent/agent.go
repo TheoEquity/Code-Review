@@ -737,7 +737,10 @@ func (a *Agent) templateFileHints() []string {
 	if a.args.FileFilter == nil {
 		return nil
 	}
-	return a.args.FileFilter.FileHints
+	hints := make([]string, 0, len(a.args.FileFilter.FileHints)+len(a.args.FileFilter.SkipHints))
+	hints = append(hints, a.args.FileFilter.FileHints...)
+	hints = append(hints, a.args.FileFilter.SkipHints...)
+	return hints
 }
 
 func ragDiffStatus(d model.Diff) string {
@@ -897,7 +900,7 @@ func (a *Agent) filterDiffs(diffs []model.Diff) []model.Diff {
 
 func (a *Agent) filterByTemplateHints(diffs []model.Diff) []model.Diff {
 	f := a.args.FileFilter
-	if f == nil || (!f.HasFileHints() && f.MaxFiles <= 0) {
+	if f == nil || (!f.HasFileHints() && !f.HasSkipHints() && f.MinHintScore <= 0 && f.MaxFiles <= 0) {
 		return diffs
 	}
 
@@ -907,16 +910,23 @@ func (a *Agent) filterByTemplateHints(diffs []model.Diff) []model.Diff {
 		index int
 	}
 
-	fileIndex := a.buildLightFileIndex(diffs, f.FileHints)
+	fileIndex := a.buildLightFileIndex(diffs, a.templateFileHints())
 	scored := make([]scoredDiff, 0, len(diffs))
 	matched := 0
+	minHintScore := f.MinHintScore
+	if minHintScore <= 0 && f.HasFileHints() {
+		minHintScore = 1
+	}
 	for i, d := range diffs {
 		path := effectivePath(d)
 		score := f.FileHintScore(path)
-		if entry, ok := fileIndex[path]; ok && len(entry.HintMatches) > score {
-			score = len(entry.HintMatches)
+		if entry, ok := fileIndex[path]; ok {
+			score = max(score, countConfiguredHintMatches(entry.HintMatches, f.FileHints))
+			if f.HasSkipHints() {
+				score -= max(f.SkipHintScore(path), countConfiguredHintMatches(entry.HintMatches, f.SkipHints))
+			}
 		}
-		if score > 0 {
+		if minHintScore <= 0 || score >= minHintScore {
 			matched++
 		}
 		scored = append(scored, scoredDiff{diff: d, score: score, index: i})
@@ -936,7 +946,7 @@ func (a *Agent) filterByTemplateHints(diffs []model.Diff) []model.Diff {
 
 	var narrowed []model.Diff
 	for _, item := range scored {
-		if f.HasFileHints() && item.score == 0 {
+		if f.HasFileHints() && item.score < minHintScore {
 			continue
 		}
 		narrowed = append(narrowed, item.diff)
@@ -950,6 +960,27 @@ func (a *Agent) filterByTemplateHints(diffs []model.Diff) []model.Diff {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Template file hints selected %d of %d file(s)\n", len(narrowed), len(diffs))
 	}
 	return narrowed
+}
+
+func countConfiguredHintMatches(matches []string, hints []string) int {
+	if len(matches) == 0 || len(hints) == 0 {
+		return 0
+	}
+	configured := make(map[string]struct{}, len(hints))
+	for _, hint := range hints {
+		hint = strings.ToLower(strings.TrimSpace(hint))
+		if hint != "" {
+			configured[hint] = struct{}{}
+		}
+	}
+	count := 0
+	for _, match := range matches {
+		match = strings.ToLower(strings.TrimSpace(match))
+		if _, ok := configured[match]; ok {
+			count++
+		}
+	}
+	return count
 }
 
 func limitTemplateFiles(diffs []model.Diff, maxFiles int) []model.Diff {
