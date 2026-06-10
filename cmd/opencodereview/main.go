@@ -52,8 +52,6 @@ func dispatch() error {
 		return runLLM(args[1:])
 	case "rules":
 		return runRules(args[1:])
-	case "viewer":
-		return runViewer(args[1:])
 	case "-h", "--help":
 		printTopLevelUsage()
 		return nil
@@ -73,7 +71,6 @@ Commands:
   rules        Inspect and debug review rules
   config       Manage configuration settings
   llm          LLM utility commands
-  viewer       Start the WebUI session viewer
   version      Show version information
 
 Examples:
