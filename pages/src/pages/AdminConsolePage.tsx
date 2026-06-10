@@ -166,12 +166,22 @@ interface ReviewTask {
 }
 
 interface LLMConfigState {
+  name: string;
   url: string;
   authToken: string;
   model: string;
   useAnthropic: boolean;
   extraBody: string;
 }
+
+const createEmptyLLMProvider = (index = 0): LLMConfigState => ({
+  name: index === 0 ? 'primary' : `fallback-${index}`,
+  url: '',
+  authToken: '',
+  model: '',
+  useAnthropic: true,
+  extraBody: '',
+});
 
 interface AddRepoResponse extends RepoItem {
   error?: string;
@@ -260,13 +270,7 @@ const AdminConsolePage: React.FC = () => {
   const [ruleLayers, setRuleLayers] = useState<RuleLayer[]>([]);
   const [ruleOptimizations, setRuleOptimizations] = useState<RuleOptimization[]>([]);
   const [rulesLoading, setRulesLoading] = useState(false);
-  const [llmConfig, setLlmConfig] = useState<LLMConfigState>({
-    url: '',
-    authToken: '',
-    model: '',
-    useAnthropic: true,
-    extraBody: '',
-  });
+  const [llmProviders, setLlmProviders] = useState<LLMConfigState[]>([createEmptyLLMProvider()]);
   const [llmConfigPath, setLlmConfigPath] = useState('');
   const [llmResolvedVia, setLlmResolvedVia] = useState('');
   const [llmResolvedUrl, setLlmResolvedUrl] = useState('');
@@ -812,13 +816,15 @@ const AdminConsolePage: React.FC = () => {
         const response = await fetch('/api/config/llm');
         const data = await response.json();
         if (!cancelled) {
-          setLlmConfig({
-            url: data.config?.url ?? '',
-            authToken: data.config?.authToken ?? '',
-            model: data.config?.model ?? '',
-            useAnthropic: data.config?.useAnthropic ?? true,
-            extraBody: data.config?.extraBody ?? '',
-          });
+          const providers = Array.isArray(data.providers) && data.providers.length > 0 ? data.providers : [data.config];
+          setLlmProviders(providers.map((provider: Partial<LLMConfigState>, index: number) => ({
+            name: provider?.name ?? (index === 0 ? 'primary' : `fallback-${index}`),
+            url: provider?.url ?? '',
+            authToken: provider?.authToken ?? '',
+            model: provider?.model ?? '',
+            useAnthropic: provider?.useAnthropic ?? true,
+            extraBody: provider?.extraBody ?? '',
+          })));
           setLlmConfigPath(data.configPath ?? '');
           setLlmResolvedVia(data.resolvedVia ?? '');
           setLlmResolvedUrl(data.resolvedUrl ?? '');
@@ -865,7 +871,7 @@ const AdminConsolePage: React.FC = () => {
       const response = await fetch('/api/config/llm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(llmConfig),
+        body: JSON.stringify({ providers: llmProviders }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -882,6 +888,18 @@ const AdminConsolePage: React.FC = () => {
     } finally {
       setLlmConfigSaving(false);
     }
+  };
+
+  const updateLLMProvider = (index: number, patch: Partial<LLMConfigState>) => {
+    setLlmProviders((prev) => prev.map((provider, itemIndex) => itemIndex === index ? { ...provider, ...patch } : provider));
+  };
+
+  const addLLMProvider = () => {
+    setLlmProviders((prev) => [...prev, createEmptyLLMProvider(prev.length)]);
+  };
+
+  const removeLLMProvider = (index: number) => {
+    setLlmProviders((prev) => prev.length <= 1 ? prev : prev.filter((_, itemIndex) => itemIndex !== index));
   };
 
   const handleOpenRepoSessions = (encodedPath: string) => {
@@ -2429,30 +2447,46 @@ const AdminConsolePage: React.FC = () => {
             </div>
 
             <div className="mt-4 space-y-4">
-              <label className="block text-sm text-slate-700">
-                <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.url')}</div>
-                <input value={llmConfig.url} onChange={(event) => setLlmConfig((prev) => ({ ...prev, url: event.target.value }))} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
-              </label>
+              {llmProviders.map((provider, index) => (
+                <div key={index} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-slate-900">{index === 0 ? '主模型' : `备用模型 ${index}`}</div>
+                    {llmProviders.length > 1 && (
+                      <button type="button" onClick={() => removeLLMProvider(index)} className="text-xs font-semibold text-red-600">移除</button>
+                    )}
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="block text-sm text-slate-700">
+                      <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">名称</div>
+                      <input value={provider.name} onChange={(event) => updateLLMProvider(index, { name: event.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
+                    </label>
+                    <label className="block text-sm text-slate-700">
+                      <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.model')}</div>
+                      <input value={provider.model} onChange={(event) => updateLLMProvider(index, { model: event.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
+                    </label>
+                  </div>
+                  <label className="mt-3 block text-sm text-slate-700">
+                    <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.url')}</div>
+                    <input value={provider.url} onChange={(event) => updateLLMProvider(index, { url: event.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
+                  </label>
+                  <label className="mt-3 block text-sm text-slate-700">
+                    <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.authToken')}</div>
+                    <input type="password" value={provider.authToken} onChange={(event) => updateLLMProvider(index, { authToken: event.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
+                  </label>
+                  <label className="mt-3 block text-sm text-slate-700">
+                    <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.extraBody')}</div>
+                    <textarea value={provider.extraBody} onChange={(event) => updateLLMProvider(index, { extraBody: event.target.value })} rows={4} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
+                  </label>
+                  <label className="mt-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                    <input type="checkbox" checked={provider.useAnthropic} onChange={(event) => updateLLMProvider(index, { useAnthropic: event.target.checked })} />
+                    <span>{t('admin.settings.useAnthropic')}</span>
+                  </label>
+                </div>
+              ))}
 
-              <label className="block text-sm text-slate-700">
-                <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.authToken')}</div>
-                <input type="password" value={llmConfig.authToken} onChange={(event) => setLlmConfig((prev) => ({ ...prev, authToken: event.target.value }))} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
-              </label>
-
-              <label className="block text-sm text-slate-700">
-                <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.model')}</div>
-                <input value={llmConfig.model} onChange={(event) => setLlmConfig((prev) => ({ ...prev, model: event.target.value }))} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
-              </label>
-
-              <label className="block text-sm text-slate-700">
-                <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.extraBody')}</div>
-                <textarea value={llmConfig.extraBody} onChange={(event) => setLlmConfig((prev) => ({ ...prev, extraBody: event.target.value }))} rows={6} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
-              </label>
-
-              <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                <input type="checkbox" checked={llmConfig.useAnthropic} onChange={(event) => setLlmConfig((prev) => ({ ...prev, useAnthropic: event.target.checked }))} />
-                <span>{t('admin.settings.useAnthropic')}</span>
-              </label>
+              <button type="button" onClick={addLLMProvider} className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700">
+                添加备用模型
+              </button>
 
               <button onClick={handleSaveLLMConfig} disabled={llmConfigSaving} className="rounded-xl bg-brand-500 px-4 py-3 text-sm font-semibold text-slate-950 transition-opacity disabled:cursor-not-allowed disabled:opacity-60">
                 {llmConfigSaving ? t('admin.settings.saving') : t('admin.settings.save')}

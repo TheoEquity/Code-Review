@@ -203,6 +203,80 @@ func NewLLMClient(ep ResolvedEndpoint) LLMClient {
 	return NewOpenAIClient(cfg)
 }
 
+type fallbackEndpointClient struct {
+	endpoint ResolvedEndpoint
+	client   LLMClient
+}
+
+type FallbackClient struct {
+	clients []fallbackEndpointClient
+	next    int
+	mu      sync.Mutex
+}
+
+func NewFallbackClient(endpoints []ResolvedEndpoint) LLMClient {
+	if len(endpoints) == 0 {
+		return nil
+	}
+	if len(endpoints) == 1 {
+		return NewLLMClient(endpoints[0])
+	}
+	clients := make([]fallbackEndpointClient, 0, len(endpoints))
+	for _, ep := range endpoints {
+		clients = append(clients, fallbackEndpointClient{endpoint: ep, client: NewLLMClient(ep)})
+	}
+	return &FallbackClient{clients: clients}
+}
+
+func (c *FallbackClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	if len(c.clients) == 0 {
+		return nil, fmt.Errorf("no fallback LLM clients configured")
+	}
+	start := c.currentIndex()
+	var errors []string
+	for attempt := 0; attempt < len(c.clients); attempt++ {
+		idx := (start + attempt) % len(c.clients)
+		entry := c.clients[idx]
+		reqForProvider := req
+		reqForProvider.Model = entry.endpoint.Model
+		resp, err := entry.client.CompletionsWithCtx(ctx, reqForProvider)
+		if err == nil {
+			c.setCurrentIndex(idx)
+			return resp, nil
+		}
+		errors = append(errors, fmt.Sprintf("%s: %v", endpointLabel(entry.endpoint), err))
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+	return nil, fmt.Errorf("all LLM providers failed: %s", strings.Join(errors, "; "))
+}
+
+func (c *FallbackClient) currentIndex() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.next < 0 || c.next >= len(c.clients) {
+		c.next = 0
+	}
+	return c.next
+}
+
+func (c *FallbackClient) setCurrentIndex(index int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.next = index
+}
+
+func endpointLabel(ep ResolvedEndpoint) string {
+	if ep.Name != "" {
+		return ep.Name
+	}
+	if ep.Model != "" {
+		return ep.Model
+	}
+	return ep.Source
+}
+
 // --- Token counting with tiktoken ---
 
 // modelTokenizerCache caches initialized tiktoken encoders keyed by encoding name.

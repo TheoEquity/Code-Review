@@ -150,6 +150,7 @@ type addRepoRequest struct {
 }
 
 type llmConfigPayload struct {
+	Name         string `json:"name"`
 	URL          string `json:"url"`
 	AuthToken    string `json:"authToken"`
 	Model        string `json:"model"`
@@ -158,12 +159,13 @@ type llmConfigPayload struct {
 }
 
 type llmConfigResponse struct {
-	Config      llmConfigPayload `json:"config"`
-	ConfigPath  string           `json:"configPath"`
-	Configured  bool             `json:"configured"`
-	ResolvedURL string           `json:"resolvedUrl,omitempty"`
-	ResolvedVia string           `json:"resolvedVia,omitempty"`
-	Protocol    string           `json:"protocol,omitempty"`
+	Config      llmConfigPayload   `json:"config"`
+	Providers   []llmConfigPayload `json:"providers"`
+	ConfigPath  string             `json:"configPath"`
+	Configured  bool               `json:"configured"`
+	ResolvedURL string             `json:"resolvedUrl,omitempty"`
+	ResolvedVia string             `json:"resolvedVia,omitempty"`
+	Protocol    string             `json:"protocol,omitempty"`
 }
 
 type managedRepo struct {
@@ -380,46 +382,68 @@ func readViewerConfig() (map[string]any, string, error) {
 	return cfg, configPath, nil
 }
 
-func readLLMConfigPayload() (llmConfigPayload, string, error) {
+func readLLMConfigPayload() (llmConfigPayload, []llmConfigPayload, string, error) {
 	cfg, configPath, err := readViewerConfig()
 	if err != nil {
-		return llmConfigPayload{}, "", err
+		return llmConfigPayload{}, nil, "", err
 	}
 	payload := llmConfigPayload{UseAnthropic: true}
+	var providers []llmConfigPayload
 	if llmSection, ok := cfg["llm"].(map[string]any); ok {
-		if value, ok := llmSection["url"].(string); ok {
-			payload.URL = value
-		}
-		if value, ok := llmSection["auth_token"].(string); ok {
-			payload.AuthToken = value
-		}
-		if value, ok := llmSection["model"].(string); ok {
-			payload.Model = value
-		}
-		if value, ok := llmSection["use_anthropic"].(bool); ok {
-			payload.UseAnthropic = value
-		}
-		if value, ok := llmSection["extra_body"]; ok && value != nil {
-			if data, err := json.MarshalIndent(value, "", "  "); err == nil {
-				payload.ExtraBody = string(data)
+		payload = llmPayloadFromMap(llmSection)
+		if providerValues, ok := llmSection["providers"].([]any); ok {
+			for _, item := range providerValues {
+				if provider, ok := item.(map[string]any); ok {
+					providers = append(providers, llmPayloadFromMap(provider))
+				}
 			}
 		}
 	}
-	return payload, configPath, nil
+	if len(providers) == 0 && payload.URL != "" && payload.AuthToken != "" && payload.Model != "" {
+		providers = append(providers, payload)
+	}
+	return payload, providers, configPath, nil
+}
+
+func llmPayloadFromMap(values map[string]any) llmConfigPayload {
+	payload := llmConfigPayload{UseAnthropic: true}
+	if value, ok := values["name"].(string); ok {
+		payload.Name = value
+	}
+	if value, ok := values["url"].(string); ok {
+		payload.URL = value
+	}
+	if value, ok := values["auth_token"].(string); ok {
+		payload.AuthToken = value
+	}
+	if value, ok := values["model"].(string); ok {
+		payload.Model = value
+	}
+	if value, ok := values["use_anthropic"].(bool); ok {
+		payload.UseAnthropic = value
+	}
+	if value, ok := values["extra_body"]; ok && value != nil {
+		if data, err := json.MarshalIndent(value, "", "  "); err == nil {
+			payload.ExtraBody = string(data)
+		}
+	}
+	return payload
 }
 
 func handleLLMConfigAPI(w http.ResponseWriter, _ *http.Request) {
-	payload, configPath, err := readLLMConfigPayload()
+	payload, providers, configPath, err := readLLMConfigPayload()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	response := llmConfigResponse{
 		Config:     payload,
+		Providers:  providers,
 		ConfigPath: configPath,
-		Configured: payload.URL != "" && payload.AuthToken != "" && payload.Model != "",
+		Configured: len(providers) > 0,
 	}
-	if endpoint, err := llm.ResolveEndpoint(configPath); err == nil {
+	if endpoints, err := llm.ResolveEndpoints(configPath); err == nil && len(endpoints) > 0 {
+		endpoint := endpoints[0]
 		response.ResolvedURL = endpoint.URL
 		response.ResolvedVia = endpoint.Source
 		response.Protocol = endpoint.Protocol
@@ -428,17 +452,29 @@ func handleLLMConfigAPI(w http.ResponseWriter, _ *http.Request) {
 }
 
 func handleSaveLLMConfigAPI(w http.ResponseWriter, r *http.Request) {
-	var req llmConfigPayload
+	var req struct {
+		llmConfigPayload
+		Providers []llmConfigPayload `json:"providers"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
 		return
 	}
-	req.URL = normalizeConfigString(req.URL)
-	req.AuthToken = normalizeConfigString(req.AuthToken)
-	req.Model = normalizeConfigString(req.Model)
-	req.ExtraBody = strings.TrimSpace(req.ExtraBody)
-	if req.URL == "" || req.AuthToken == "" || req.Model == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url, auth token, and model are required"})
+	providers := req.Providers
+	if len(providers) == 0 {
+		providers = []llmConfigPayload{req.llmConfigPayload}
+	}
+	providerSections := make([]map[string]any, 0, len(providers))
+	for i := range providers {
+		section, err := llmPayloadToConfigMap(providers[i])
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		providerSections = append(providerSections, section)
+	}
+	if len(providerSections) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one model provider is required"})
 		return
 	}
 
@@ -448,20 +484,8 @@ func handleSaveLLMConfigAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	llmSection := map[string]any{
-		"url":           req.URL,
-		"auth_token":    req.AuthToken,
-		"model":         req.Model,
-		"use_anthropic": req.UseAnthropic,
-	}
-	if req.ExtraBody != "" {
-		var extraBody map[string]any
-		if err := json.Unmarshal([]byte(req.ExtraBody), &extraBody); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid extraBody json: %v", err)})
-			return
-		}
-		llmSection["extra_body"] = extraBody
-	}
+	llmSection := providerSections[0]
+	llmSection["providers"] = providerSections
 	cfg["llm"] = llmSection
 
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -479,6 +503,34 @@ func handleSaveLLMConfigAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handleLLMConfigAPI(w, r)
+}
+
+func llmPayloadToConfigMap(payload llmConfigPayload) (map[string]any, error) {
+	payload.Name = normalizeConfigString(payload.Name)
+	payload.URL = normalizeConfigString(payload.URL)
+	payload.AuthToken = normalizeConfigString(payload.AuthToken)
+	payload.Model = normalizeConfigString(payload.Model)
+	payload.ExtraBody = strings.TrimSpace(payload.ExtraBody)
+	if payload.URL == "" || payload.AuthToken == "" || payload.Model == "" {
+		return nil, fmt.Errorf("url, auth token, and model are required for each provider")
+	}
+	section := map[string]any{
+		"url":           payload.URL,
+		"auth_token":    payload.AuthToken,
+		"model":         payload.Model,
+		"use_anthropic": payload.UseAnthropic,
+	}
+	if payload.Name != "" {
+		section["name"] = payload.Name
+	}
+	if payload.ExtraBody != "" {
+		var extraBody map[string]any
+		if err := json.Unmarshal([]byte(payload.ExtraBody), &extraBody); err != nil {
+			return nil, fmt.Errorf("invalid extraBody json: %v", err)
+		}
+		section["extra_body"] = extraBody
+	}
+	return section, nil
 }
 
 func validatePathValue(value string) bool {
@@ -1733,23 +1785,23 @@ func handleCreateReviewTaskAPI(w http.ResponseWriter, r *http.Request, root stri
 	}
 	taskID := fmt.Sprintf("review-%d", time.Now().UnixNano())
 	task := &reviewTaskResponse{
-		TaskID:      taskID,
-		EncodedRepo: repoInfo.EncodedPath,
-		RepoName:    repoInfo.DisplayName,
-		RepoPath:    repoInfo.RepoPath,
-		Branch:      req.EncodedBranch,
-		ReviewMode:  req.ReviewMode,
-		BaseRef:     req.BaseRef,
-		TargetRef:   req.TargetRef,
-		CommitRef:   req.CommitRef,
-		Background:  req.Background,
-		Format:      req.Format,
-		Timeout:     req.Timeout,
-		Concurrency: req.Concurrency,
-		RulePath:    req.RulePath,
+		TaskID:       taskID,
+		EncodedRepo:  repoInfo.EncodedPath,
+		RepoName:     repoInfo.DisplayName,
+		RepoPath:     repoInfo.RepoPath,
+		Branch:       req.EncodedBranch,
+		ReviewMode:   req.ReviewMode,
+		BaseRef:      req.BaseRef,
+		TargetRef:    req.TargetRef,
+		CommitRef:    req.CommitRef,
+		Background:   req.Background,
+		Format:       req.Format,
+		Timeout:      req.Timeout,
+		Concurrency:  req.Concurrency,
+		RulePath:     req.RulePath,
 		TemplateName: req.TemplateName,
-		Status:      "running",
-		StartedAt:   time.Now(),
+		Status:       "running",
+		StartedAt:    time.Now(),
 	}
 	reviewTaskStore.Lock()
 	reviewTaskStore.tasks[taskID] = task
