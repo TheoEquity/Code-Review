@@ -13,9 +13,15 @@
 
 ## TheoEquity Code Review
 
-完全自主维护的代码审查 AI Agent 分支。增强了 Web 管理台、全量仓库审计、仓库管理、任务清单、问题清单、审计报告和规则管理能力。
+This is an independent maintenance fork of the [Open Code Review](https://github.com/alibaba/open-code-review) project (Apache 2.0 License).
 
-**安装请直接使用本仓库的 `main` 分支，不要使用 NPM 或阿里原版 Release。**
+This fork adds enhanced features for enterprise use cases:
+- **Web Management Console** - Repository management, task lists, issue tracking, audit reports
+- **Full Repository Audit Mode** - Complete codebase scanning with smart non-source filtering
+- **Multi-LLM Fallback** - Configure primary and fallback LLM providers
+- **Issue List & Audit Reports** - Structured defect tracking and comprehensive diagnosis
+
+**Installation: Always use this repository's `main` branch. The NPM package and upstream releases do not include these enhancements.**
 
 ### 自开发功能
 
@@ -483,8 +489,8 @@ Set `telemetry.content_logging` to include LLM prompts and responses in exported
 
 ## Contributing
 
-See CONTRIBUTING.md for development setup, coding guidelines, and how to submit pull requests.
+See CONTRIBUTING.md for development setup and guidelines.
 
 ## License
 
-Apache-2.0 — Copyright 2026 TheoEquity
+Apache-2.0 — Copyright 2026 TheoEquity. Derived from [Open Code Review](https://github.com/alibaba/open-code-review) (Copyright 2026 Alibaba).
