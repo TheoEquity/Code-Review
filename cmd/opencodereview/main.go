@@ -52,6 +52,8 @@ func dispatch() error {
 		return runLLM(args[1:])
 	case "rules":
 		return runRules(args[1:])
+	case "serve":
+		return runServe(args[1:])
 	case "-h", "--help":
 		printTopLevelUsage()
 		return nil
@@ -71,6 +73,7 @@ Commands:
   rules        Inspect and debug review rules
   config       Manage configuration settings
   llm          LLM utility commands
+  serve        Start the production Web console
   version      Show version information
 
 Examples:
@@ -78,12 +81,14 @@ Examples:
   ocr review --commit abc123               Review a single commit
   ocr config set llm.model opus-4-6        Set a config value
   ocr llm test                             Test LLM connectivity
+  ocr serve                                Start Web console on localhost:3030
   ocr version                              Show version info
 
 Use "ocr review -h" for more information about review.
 Use "ocr rules -h" for more information about rules.
 Use "ocr config" for more information about config.
 Use "ocr llm" for more information about LLM utilities.
+Use "ocr serve -h" for more information about serve.
 
-GitHub: https://github.com/alibaba/open-code-review`)
+GitHub: https://github.com/TheoEquity/Code-Review`)
 }
