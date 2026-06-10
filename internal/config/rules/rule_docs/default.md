@@ -1,22 +1,11 @@
-#### Correctness
-Is the logic correct? Are there missing boundary conditions?
-Are exceptions handled properly?
-Is it thread-safe in concurrent scenarios?
+#### P4 System Fallback
+Use this only as a lightweight fallback when no higher-priority rule gives more specific guidance.
 
-#### Security
-Are there security vulnerabilities such as SQL injection or XSS?
-Is sensitive information handled correctly?
-Is permission validation complete?
+Report only high-confidence issues in changed code:
+- Correctness defects: broken control flow, missing boundary handling, unsafe nil/null access, and incorrect error handling.
+- Security defects: injection risk, unsafe user-controlled output, sensitive data exposure, and missing authorization checks.
+- Performance defects: obvious N+1 queries, unbounded large-data processing, and repeated expensive work in hot paths.
+- Reliability defects: resource leaks, unsafe concurrent mutation, and incomplete cleanup on error paths.
+- Test gaps: missing coverage for newly added critical logic or edge cases.
 
-#### Performance
-Are there obvious performance issues (e.g., N+1 queries, unnecessary loops)?
-Are resources properly released?
-
-#### Maintainability
-Is the code clear and easy to understand?
-Do names accurately express intent?
-Does it follow the project’s existing code style and architecture patterns?
-
-#### Test Coverage
-Do critical logic paths have corresponding test cases?
-Do test cases cover boundary conditions?
+Avoid style-only, preference-only, spelling-only, and broad best-practice findings unless they directly create one of the risks above.

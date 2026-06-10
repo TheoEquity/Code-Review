@@ -1,10 +1,48 @@
 package llm
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 )
+
+type fakeLLMClient struct {
+	name      string
+	err       error
+	models    *[]string
+	callCount *int
+}
+
+func (c fakeLLMClient) CompletionsWithCtx(_ context.Context, req ChatRequest) (*ChatResponse, error) {
+	*c.callCount = *c.callCount + 1
+	*c.models = append(*c.models, req.Model)
+	if c.err != nil {
+		return nil, c.err
+	}
+	return &ChatResponse{Model: req.Model, Choices: []Choice{{Message: ResponseMessage{Role: "assistant"}}}}, nil
+}
+
+func TestFallbackClientUsesNextProviderAfterFailure(t *testing.T) {
+	models := []string{}
+	calls := 0
+	client := &FallbackClient{clients: []fallbackEndpointClient{
+		{endpoint: ResolvedEndpoint{Name: "bad", Model: "bad-model"}, client: fakeLLMClient{err: fmt.Errorf("temporary failure"), models: &models, callCount: &calls}},
+		{endpoint: ResolvedEndpoint{Name: "good", Model: "good-model"}, client: fakeLLMClient{models: &models, callCount: &calls}},
+	}}
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{Model: "ignored-model"})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if resp.Model != "good-model" {
+		t.Fatalf("expected good-model response, got %q", resp.Model)
+	}
+	if calls != 2 || len(models) != 2 || models[0] != "bad-model" || models[1] != "good-model" {
+		t.Fatalf("unexpected fallback attempts: calls=%d models=%v", calls, models)
+	}
+}
 
 func TestNewOpenAIClient_URLNormalization(t *testing.T) {
 	tests := []struct {

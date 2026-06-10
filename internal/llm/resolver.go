@@ -11,6 +11,7 @@ import (
 
 // ResolvedEndpoint holds the resolved LLM endpoint configuration.
 type ResolvedEndpoint struct {
+	Name      string
 	URL       string
 	Token     string
 	Model     string
@@ -38,29 +39,57 @@ const (
 // Each strategy requires all three fields (URL, Token, Model) to be non-empty.
 // Returns the first valid strategy's result.
 func ResolveEndpoint(configPath string) (ResolvedEndpoint, error) {
+	endpoints, err := ResolveEndpoints(configPath)
+	if err != nil {
+		return ResolvedEndpoint{}, err
+	}
+	if len(endpoints) == 0 {
+		return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL, ~/.opencodereview/config.json, or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL must be set")
+	}
+	return endpoints[0], nil
+}
+
+func ResolveEndpoints(configPath string) ([]ResolvedEndpoint, error) {
 	strategies := []struct {
 		name string
-		fn   func() (ResolvedEndpoint, bool, error)
+		fn   func() ([]ResolvedEndpoint, bool, error)
 	}{
-		{"OCR config file", func() (ResolvedEndpoint, bool, error) { return tryOCRConfig(configPath) }},
-		{"OCR environment", tryOCREnv},
-		{"Claude Code environment", tryCCEnv},
-		{"Shell rc file", tryShellRC},
+		{"OCR config file", func() ([]ResolvedEndpoint, bool, error) { return tryOCRConfigEndpoints(configPath) }},
+		{"OCR environment", func() ([]ResolvedEndpoint, bool, error) { return singleEndpointStrategy(tryOCREnv) }},
+		{"Claude Code environment", func() ([]ResolvedEndpoint, bool, error) { return singleEndpointStrategy(tryCCEnv) }},
+		{"Shell rc file", func() ([]ResolvedEndpoint, bool, error) { return singleEndpointStrategy(tryShellRC) }},
 	}
 
 	for _, s := range strategies {
-		ep, ok, err := s.fn()
+		endpoints, ok, err := s.fn()
 		if err != nil {
-			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", s.name, err)
+			return nil, fmt.Errorf("resolve %s: %w", s.name, err)
 		}
-		if ok && ep.URL != "" && ep.Token != "" && ep.Model != "" {
-			ep.Source = s.name
-			ep.Model = stripModelSuffix(ep.Model)
-			return ep, nil
+		if ok && len(endpoints) > 0 {
+			resolved := make([]ResolvedEndpoint, 0, len(endpoints))
+			for _, ep := range endpoints {
+				if ep.URL == "" || ep.Token == "" || ep.Model == "" {
+					continue
+				}
+				ep.Source = s.name
+				ep.Model = stripModelSuffix(ep.Model)
+				resolved = append(resolved, ep)
+			}
+			if len(resolved) > 0 {
+				return resolved, nil
+			}
 		}
 	}
 
-	return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL, ~/.opencodereview/config.json, or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL must be set")
+	return nil, nil
+}
+
+func singleEndpointStrategy(fn func() (ResolvedEndpoint, bool, error)) ([]ResolvedEndpoint, bool, error) {
+	ep, ok, err := fn()
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	return []ResolvedEndpoint{ep}, true, nil
 }
 
 // tryOCREnv reads OCR-specific environment variables.
@@ -88,11 +117,13 @@ func tryOCREnv() (ResolvedEndpoint, bool, error) {
 
 // llmFileConfig represents the llm section in config.json.
 type llmFileConfig struct {
-	URL          string         `json:"url,omitempty"`
-	AuthToken    string         `json:"auth_token,omitempty"`
-	Model        string         `json:"model,omitempty"`
-	UseAnthropic *bool          `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false
-	ExtraBody    map[string]any `json:"extra_body,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	URL          string          `json:"url,omitempty"`
+	AuthToken    string          `json:"auth_token,omitempty"`
+	Model        string          `json:"model,omitempty"`
+	UseAnthropic *bool           `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false
+	ExtraBody    map[string]any  `json:"extra_body,omitempty"`
+	Providers    []llmFileConfig `json:"providers,omitempty"`
 }
 
 type configFile struct {
@@ -101,26 +132,50 @@ type configFile struct {
 
 // tryOCRConfig reads the OCR config file.
 func tryOCRConfig(path string) (ResolvedEndpoint, bool, error) {
+	endpoints, ok, err := tryOCRConfigEndpoints(path)
+	if err != nil || !ok || len(endpoints) == 0 {
+		return ResolvedEndpoint{}, ok, err
+	}
+	return endpoints[0], true, nil
+}
+
+func tryOCRConfigEndpoints(path string) ([]ResolvedEndpoint, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return ResolvedEndpoint{}, false, nil
+			return nil, false, nil
 		}
-		return ResolvedEndpoint{}, false, err
+		return nil, false, err
 	}
 
 	var cfg configFile
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return ResolvedEndpoint{}, false, fmt.Errorf("parse config: %w", err)
+		return nil, false, fmt.Errorf("parse config: %w", err)
 	}
 
-	if cfg.Llm.URL == "" || cfg.Llm.AuthToken == "" || cfg.Llm.Model == "" {
-		return ResolvedEndpoint{}, false, nil
+	var endpoints []ResolvedEndpoint
+	if len(cfg.Llm.Providers) > 0 {
+		for _, provider := range cfg.Llm.Providers {
+			if ep, ok := endpointFromFileConfig(provider, "OCR config file"); ok {
+				endpoints = append(endpoints, ep)
+			}
+		}
+	} else if ep, ok := endpointFromFileConfig(cfg.Llm, "OCR config file"); ok {
+		endpoints = append(endpoints, ep)
 	}
+	if len(endpoints) == 0 {
+		return nil, false, nil
+	}
+	return endpoints, true, nil
+}
 
+func endpointFromFileConfig(cfg llmFileConfig, source string) (ResolvedEndpoint, bool) {
+	if cfg.URL == "" || cfg.AuthToken == "" || cfg.Model == "" {
+		return ResolvedEndpoint{}, false
+	}
 	useAnthropic := true // default true
-	if cfg.Llm.UseAnthropic != nil {
-		useAnthropic = *cfg.Llm.UseAnthropic
+	if cfg.UseAnthropic != nil {
+		useAnthropic = *cfg.UseAnthropic
 	}
 
 	protocol := "anthropic"
@@ -128,7 +183,7 @@ func tryOCRConfig(path string) (ResolvedEndpoint, bool, error) {
 		protocol = "openai"
 	}
 
-	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: cfg.Llm.Model, Protocol: protocol, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody}, true, nil
+	return ResolvedEndpoint{Name: cfg.Name, URL: cfg.URL, Token: cfg.AuthToken, Model: cfg.Model, Protocol: protocol, Source: source, ExtraBody: cfg.ExtraBody}, true
 }
 
 // tryCCEnv reads Claude Code environment variables.

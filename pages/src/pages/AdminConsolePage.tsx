@@ -112,12 +112,21 @@ interface RuleLayer {
   title: string;
   path: string;
   description?: string;
+  summary?: string;
   available: boolean;
   defaultRule?: string;
   include?: string[];
   exclude?: string[];
   rules?: Array<{ path: string; rule: string }>;
   pathRules?: Array<{ pattern: string; rule: string }>;
+}
+
+interface RuleOptimization {
+  title: string;
+  stage: string;
+  description: string;
+  source: string;
+  details?: string[];
 }
 
 interface IssueListItem {
@@ -157,12 +166,23 @@ interface ReviewTask {
 }
 
 interface LLMConfigState {
+  name: string;
   url: string;
   authToken: string;
+  hasAuthToken?: boolean;
   model: string;
   useAnthropic: boolean;
   extraBody: string;
 }
+
+const createEmptyLLMProvider = (index = 0): LLMConfigState => ({
+  name: index === 0 ? 'primary' : `fallback-${index}`,
+  url: '',
+  authToken: '',
+  model: '',
+  useAnthropic: true,
+  extraBody: '',
+});
 
 interface AddRepoResponse extends RepoItem {
   error?: string;
@@ -249,14 +269,9 @@ const AdminConsolePage: React.FC = () => {
   const [issueListExpanded, setIssueListExpanded] = useState(false);
   const [reviewFilesExpanded, setReviewFilesExpanded] = useState(false);
   const [ruleLayers, setRuleLayers] = useState<RuleLayer[]>([]);
+  const [ruleOptimizations, setRuleOptimizations] = useState<RuleOptimization[]>([]);
   const [rulesLoading, setRulesLoading] = useState(false);
-  const [llmConfig, setLlmConfig] = useState<LLMConfigState>({
-    url: '',
-    authToken: '',
-    model: '',
-    useAnthropic: true,
-    extraBody: '',
-  });
+  const [llmProviders, setLlmProviders] = useState<LLMConfigState[]>([createEmptyLLMProvider()]);
   const [llmConfigPath, setLlmConfigPath] = useState('');
   const [llmResolvedVia, setLlmResolvedVia] = useState('');
   const [llmResolvedUrl, setLlmResolvedUrl] = useState('');
@@ -585,14 +600,14 @@ const AdminConsolePage: React.FC = () => {
     setActiveMenu(key);
     if (key === 'sessions') {
       setSelectedSession('');
-      navigate(menuPathMap[key], { replace: true });
+      navigate(menuPathMap[key]);
     } else if (key === 'sessionDetail') {
       const params = new URLSearchParams();
       if (selectedRepo) params.set('repo', selectedRepo);
       if (selectedSession) params.set('session', selectedSession);
-      navigate(`${menuPathMap[key]}?${params.toString()}`, { replace: true });
+      navigate(`${menuPathMap[key]}?${params.toString()}`);
     } else {
-      navigate(menuPathMap[key], { replace: true });
+      navigate(menuPathMap[key]);
     }
   };
 
@@ -768,10 +783,12 @@ const AdminConsolePage: React.FC = () => {
         const data = await response.json();
         if (!cancelled) {
           setRuleLayers(Array.isArray(data.layers) ? data.layers : []);
+          setRuleOptimizations(Array.isArray(data.optimizations) ? data.optimizations : []);
         }
       } catch {
         if (!cancelled) {
           setRuleLayers([]);
+          setRuleOptimizations([]);
         }
       } finally {
         if (!cancelled) {
@@ -800,13 +817,16 @@ const AdminConsolePage: React.FC = () => {
         const response = await fetch('/api/config/llm');
         const data = await response.json();
         if (!cancelled) {
-          setLlmConfig({
-            url: data.config?.url ?? '',
-            authToken: data.config?.authToken ?? '',
-            model: data.config?.model ?? '',
-            useAnthropic: data.config?.useAnthropic ?? true,
-            extraBody: data.config?.extraBody ?? '',
-          });
+          const providers = Array.isArray(data.providers) && data.providers.length > 0 ? data.providers : [data.config];
+          setLlmProviders(providers.map((provider: Partial<LLMConfigState>, index: number) => ({
+            name: provider?.name ?? (index === 0 ? 'primary' : `fallback-${index}`),
+            url: provider?.url ?? '',
+            authToken: provider?.authToken ?? '',
+            hasAuthToken: provider?.hasAuthToken ?? false,
+            model: provider?.model ?? '',
+            useAnthropic: provider?.useAnthropic ?? true,
+            extraBody: provider?.extraBody ?? '',
+          })));
           setLlmConfigPath(data.configPath ?? '');
           setLlmResolvedVia(data.resolvedVia ?? '');
           setLlmResolvedUrl(data.resolvedUrl ?? '');
@@ -853,7 +873,7 @@ const AdminConsolePage: React.FC = () => {
       const response = await fetch('/api/config/llm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(llmConfig),
+        body: JSON.stringify({ providers: llmProviders.map((provider) => ({ ...provider, authToken: provider.hasAuthToken ? '' : provider.authToken })) }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -870,6 +890,18 @@ const AdminConsolePage: React.FC = () => {
     } finally {
       setLlmConfigSaving(false);
     }
+  };
+
+  const updateLLMProvider = (index: number, patch: Partial<LLMConfigState>) => {
+    setLlmProviders((prev) => prev.map((provider, itemIndex) => itemIndex === index ? { ...provider, ...patch } : provider));
+  };
+
+  const addLLMProvider = () => {
+    setLlmProviders((prev) => [...prev, createEmptyLLMProvider(prev.length)]);
+  };
+
+  const removeLLMProvider = (index: number) => {
+    setLlmProviders((prev) => prev.length <= 1 ? prev : prev.filter((_, itemIndex) => itemIndex !== index));
   };
 
   const handleOpenRepoSessions = (encodedPath: string) => {
@@ -895,11 +927,10 @@ const AdminConsolePage: React.FC = () => {
     const template = AUDIT_TEMPLATES.find(t => t.id === reviewForm.auditTemplate);
     let background = reviewForm.background;
     let rulePath = reviewForm.rulePath;
-    let templateName = '';
+    let templateName = template?.name || '';
     
     if (template && template.id !== 'all' && template.id !== 'custom') {
       rulePath = template.rulePath;
-      templateName = template.name;
       if (!background.trim()) {
         background = `本次审计类型：${template.name}。${template.description}。`;
       }
@@ -963,7 +994,7 @@ const AdminConsolePage: React.FC = () => {
       setReports((prev) => [data, ...prev.filter((item) => item.id !== data.id)]);
       setExpandedReport(data.id);
       setActiveMenu('reports');
-      navigate(menuPathMap.reports, { replace: true });
+      navigate(menuPathMap.reports);
     } catch {
       setReportMessage(t('admin.reports.generateFailed'));
     } finally {
@@ -993,7 +1024,7 @@ const AdminConsolePage: React.FC = () => {
       setReportMessage(t('admin.issues.generateSuccess'));
       setIssueLists((prev) => [data, ...prev.filter((item) => item.id !== data.id)]);
       setSelectedIssueListId(data.id);
-      navigate(menuPathMap.issueLists, { replace: true });
+      navigate(menuPathMap.issueLists);
     } catch {
       setReportMessage(t('admin.issues.generateFailed'));
     } finally {
@@ -1664,6 +1695,7 @@ const AdminConsolePage: React.FC = () => {
                   <div>{t('admin.data.sessionFailures')}: <span className="text-slate-900">{sessionDetail.summary.llmFailures ?? 0}</span></div>
                   <div>警告: <span className="text-slate-900">{sessionDetail.summary.warningCount ?? 0}</span></div>
                   <div>{t('admin.data.reviewMode')}: <span className="text-slate-900">{sessionDetail.summary.reviewMode || '-'}</span></div>
+                  <div>审计模板: <span className="text-slate-900">{sessionDetail.summary.templateName || '-'}</span></div>
                 </div>
 
                 <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -1950,7 +1982,7 @@ const AdminConsolePage: React.FC = () => {
                   const params = new URLSearchParams();
                   params.set('repo', selectedList.encodedRepo);
                   params.set('session', selectedList.sessionID);
-                  navigate(`/admin/task-detail?${params.toString()}`, { replace: true });
+                  navigate(`/admin/task-detail?${params.toString()}`);
                 }}
                 className="ml-auto rounded-lg bg-blue-50 border border-blue-200 px-3 py-1.5 text-sm text-blue-700 hover:border-blue-300"
               >
@@ -2227,8 +2259,7 @@ const AdminConsolePage: React.FC = () => {
                   const deletingKey = `${sessionRepo}:${session.sessionID}`;
                   const deleting = deletingSessions.has(deletingKey);
                   
-                  // Use templateName directly from session
-                  const auditTemplate = session.templateName || (session.reviewMode === 'full' ? '全面审计' : '自定义');
+                  const auditTemplate = session.templateName || '-';
 
                   return (
                     <tr
@@ -2253,7 +2284,7 @@ const AdminConsolePage: React.FC = () => {
                           onClick={() => {
                             setSelectedRepo(sessionRepo);
                             setSelectedSession(session.sessionID);
-                            navigate(`${menuPathMap.sessionDetail}?repo=${encodeURIComponent(sessionRepo)}&session=${encodeURIComponent(session.sessionID)}`, { replace: true });
+                            navigate(`${menuPathMap.sessionDetail}?repo=${encodeURIComponent(sessionRepo)}&session=${encodeURIComponent(session.sessionID)}`);
                             setActiveMenu('sessionDetail');
                           }}
                           className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-brand-500/40 hover:text-brand-600"
@@ -2294,6 +2325,13 @@ const AdminConsolePage: React.FC = () => {
 
     if (activeMenu === 'rules') {
       const ruleEntryCount = (layer: RuleLayer) => (layer.rules?.length || 0) + (layer.pathRules?.length || 0) + (layer.defaultRule ? 1 : 0);
+      const isFallbackLayer = (layer: RuleLayer) => layer.priority === 4 && layer.source === 'system';
+      const ruleLayerStatus = (layer: RuleLayer) => {
+        if (layer.priority === 1) {
+          return '任务选择时生效';
+        }
+        return layer.available ? t('admin.rules.available') : '未发现配置文件';
+      };
 
       return (
         <div className="grid gap-4">
@@ -2303,6 +2341,37 @@ const AdminConsolePage: React.FC = () => {
               <div className="text-xs text-slate-500">{rulesLoading ? t('admin.data.loading') : `${ruleLayers.length}`}</div>
             </div>
             <div className="mt-4 space-y-4">
+              {ruleOptimizations.length > 0 && (
+                <div className="rounded-2xl border border-brand-100 bg-brand-50/60 p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">审计优化链路</div>
+                      <div className="mt-1 text-xs text-slate-600">展示专项筛选、RAG 摘要缓存和 prompt 瘦身在审计流程中的生效位置。</div>
+                    </div>
+                    <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-brand-700">{ruleOptimizations.length} 项</span>
+                  </div>
+                  <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                    {ruleOptimizations.map((item) => (
+                      <div key={item.title} className="rounded-xl border border-brand-100 bg-white p-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-semibold text-brand-700">{item.stage}</span>
+                          <span className="text-sm font-semibold text-slate-900">{item.title}</span>
+                        </div>
+                        <div className="mt-2 text-sm leading-6 text-slate-700">{item.description}</div>
+                        <div className="mt-2 break-all text-xs text-slate-500">{item.source}</div>
+                        {item.details && item.details.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {item.details.map((detail) => (
+                              <span key={detail} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600">{detail}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {ruleLayers.map((layer) => (
                 <div key={`${layer.source}-${layer.path}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
                   <div className="flex items-start justify-between gap-4">
@@ -2313,10 +2382,11 @@ const AdminConsolePage: React.FC = () => {
                         </span>
                         <span className="text-sm font-semibold text-slate-900">{layer.title || layer.source}</span>
                         <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${layer.available ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
-                          {layer.available ? t('admin.rules.available') : t('admin.rules.notConfigured')}
+                          {ruleLayerStatus(layer)}
                         </span>
                       </div>
                       {layer.description && <div className="mt-2 text-sm text-slate-600">{layer.description}</div>}
+                      {layer.summary && <div className="mt-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-600">{layer.summary}</div>}
                       <div className="mt-2 text-xs break-all text-slate-500">{layer.path}</div>
                     </div>
                     <div className="text-xs text-slate-500">
@@ -2340,18 +2410,18 @@ const AdminConsolePage: React.FC = () => {
                   </div>
 
                   {layer.defaultRule && (
-                    <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
-                      <div className="mb-2 text-xs uppercase tracking-[0.2em] text-brand-300">{t('admin.rules.defaultRule')}</div>
-                      <pre className="whitespace-pre-wrap text-xs leading-6 text-slate-700">{layer.defaultRule}</pre>
-                    </div>
+                    <details className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700" open={!isFallbackLayer(layer)}>
+                      <summary className="cursor-pointer text-xs uppercase tracking-[0.2em] text-brand-300">{isFallbackLayer(layer) ? 'P4 fallback details' : t('admin.rules.defaultRule')}</summary>
+                      <pre className="mt-3 whitespace-pre-wrap text-xs leading-6 text-slate-700">{layer.defaultRule}</pre>
+                    </details>
                   )}
 
                   <div className="mt-4 space-y-3">
                     {layer.pathRules?.map((rule) => (
-                      <div key={rule.pattern} className="rounded-xl border border-slate-200 bg-white p-4">
-                        <div className="text-xs font-semibold text-brand-300">{rule.pattern}</div>
+                      <details key={rule.pattern} className="rounded-xl border border-slate-200 bg-white p-4" open={!isFallbackLayer(layer)}>
+                        <summary className="cursor-pointer text-xs font-semibold text-brand-300">{rule.pattern}</summary>
                         <pre className="mt-2 whitespace-pre-wrap text-xs leading-6 text-slate-700">{rule.rule}</pre>
-                      </div>
+                      </details>
                     ))}
                     {layer.rules?.map((rule) => (
                       <div key={rule.path} className="rounded-xl border border-slate-200 bg-white p-4">
@@ -2377,32 +2447,50 @@ const AdminConsolePage: React.FC = () => {
               <div className="text-base font-semibold text-slate-900">{t('admin.settings.llmTitle')}</div>
               <div className="text-xs text-slate-500">{llmConfigLoading ? t('admin.data.loading') : (llmResolvedVia || t('admin.settings.notConfigured'))}</div>
             </div>
+            <p className="mt-2 text-sm leading-6 text-slate-500">按卡片顺序调用模型；主模型失败时自动尝试后续备用模型。</p>
 
             <div className="mt-4 space-y-4">
-              <label className="block text-sm text-slate-700">
-                <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.url')}</div>
-                <input value={llmConfig.url} onChange={(event) => setLlmConfig((prev) => ({ ...prev, url: event.target.value }))} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
-              </label>
+              {llmProviders.map((provider, index) => (
+                <div key={index} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-slate-900">{index === 0 ? '主模型' : `备用模型 ${index}`}</div>
+                    {llmProviders.length > 1 && (
+                      <button type="button" onClick={() => removeLLMProvider(index)} className="text-xs font-semibold text-red-600">移除</button>
+                    )}
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="block text-sm text-slate-700">
+                      <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">名称</div>
+                      <input value={provider.name} onChange={(event) => updateLLMProvider(index, { name: event.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
+                    </label>
+                    <label className="block text-sm text-slate-700">
+                      <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.model')}</div>
+                      <input value={provider.model} onChange={(event) => updateLLMProvider(index, { model: event.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
+                    </label>
+                  </div>
+                  <label className="mt-3 block text-sm text-slate-700">
+                    <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.url')}</div>
+                    <input value={provider.url} onChange={(event) => updateLLMProvider(index, { url: event.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
+                  </label>
+                  <label className="mt-3 block text-sm text-slate-700">
+                    <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.authToken')}</div>
+                    <input type="password" value={provider.hasAuthToken ? '******' : provider.authToken} disabled={provider.hasAuthToken} onChange={(event) => updateLLMProvider(index, { authToken: event.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500" />
+                    {provider.hasAuthToken && <div className="mt-1 text-xs text-slate-500">密钥已保存。需要更换时请移除此模型后重新添加。</div>}
+                  </label>
+                  <label className="mt-3 block text-sm text-slate-700">
+                    <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.extraBody')}</div>
+                    <textarea value={provider.extraBody} onChange={(event) => updateLLMProvider(index, { extraBody: event.target.value })} rows={4} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
+                  </label>
+                  <label className="mt-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                    <input type="checkbox" checked={provider.useAnthropic} onChange={(event) => updateLLMProvider(index, { useAnthropic: event.target.checked })} />
+                    <span>{t('admin.settings.useAnthropic')}</span>
+                  </label>
+                </div>
+              ))}
 
-              <label className="block text-sm text-slate-700">
-                <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.authToken')}</div>
-                <input type="password" value={llmConfig.authToken} onChange={(event) => setLlmConfig((prev) => ({ ...prev, authToken: event.target.value }))} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
-              </label>
-
-              <label className="block text-sm text-slate-700">
-                <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.model')}</div>
-                <input value={llmConfig.model} onChange={(event) => setLlmConfig((prev) => ({ ...prev, model: event.target.value }))} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
-              </label>
-
-              <label className="block text-sm text-slate-700">
-                <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.extraBody')}</div>
-                <textarea value={llmConfig.extraBody} onChange={(event) => setLlmConfig((prev) => ({ ...prev, extraBody: event.target.value }))} rows={6} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
-              </label>
-
-              <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                <input type="checkbox" checked={llmConfig.useAnthropic} onChange={(event) => setLlmConfig((prev) => ({ ...prev, useAnthropic: event.target.checked }))} />
-                <span>{t('admin.settings.useAnthropic')}</span>
-              </label>
+              <button type="button" onClick={addLLMProvider} className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700">
+                添加备用模型
+              </button>
 
               <button onClick={handleSaveLLMConfig} disabled={llmConfigSaving} className="rounded-xl bg-brand-500 px-4 py-3 text-sm font-semibold text-slate-950 transition-opacity disabled:cursor-not-allowed disabled:opacity-60">
                 {llmConfigSaving ? t('admin.settings.saving') : t('admin.settings.save')}

@@ -61,7 +61,16 @@ type sessionDetailResponse struct {
 }
 
 type rulesOverviewResponse struct {
-	Layers []ruleLayerSummary `json:"layers"`
+	Layers        []ruleLayerSummary        `json:"layers"`
+	Optimizations []ruleOptimizationSummary `json:"optimizations"`
+}
+
+type ruleOptimizationSummary struct {
+	Title       string   `json:"title"`
+	Stage       string   `json:"stage"`
+	Description string   `json:"description"`
+	Source      string   `json:"source"`
+	Details     []string `json:"details,omitempty"`
 }
 
 type ruleLayerSummary struct {
@@ -70,6 +79,7 @@ type ruleLayerSummary struct {
 	Title       string                        `json:"title"`
 	Path        string                        `json:"path"`
 	Description string                        `json:"description,omitempty"`
+	Summary     string                        `json:"summary,omitempty"`
 	Available   bool                          `json:"available"`
 	DefaultRule string                        `json:"defaultRule,omitempty"`
 	Rules       []ruleconfig.ProjectRuleEntry `json:"rules,omitempty"`
@@ -140,20 +150,23 @@ type addRepoRequest struct {
 }
 
 type llmConfigPayload struct {
+	Name         string `json:"name"`
 	URL          string `json:"url"`
 	AuthToken    string `json:"authToken"`
+	HasAuthToken bool   `json:"hasAuthToken,omitempty"`
 	Model        string `json:"model"`
 	UseAnthropic bool   `json:"useAnthropic"`
 	ExtraBody    string `json:"extraBody"`
 }
 
 type llmConfigResponse struct {
-	Config      llmConfigPayload `json:"config"`
-	ConfigPath  string           `json:"configPath"`
-	Configured  bool             `json:"configured"`
-	ResolvedURL string           `json:"resolvedUrl,omitempty"`
-	ResolvedVia string           `json:"resolvedVia,omitempty"`
-	Protocol    string           `json:"protocol,omitempty"`
+	Config      llmConfigPayload   `json:"config"`
+	Providers   []llmConfigPayload `json:"providers"`
+	ConfigPath  string             `json:"configPath"`
+	Configured  bool               `json:"configured"`
+	ResolvedURL string             `json:"resolvedUrl,omitempty"`
+	ResolvedVia string             `json:"resolvedVia,omitempty"`
+	Protocol    string             `json:"protocol,omitempty"`
 }
 
 type managedRepo struct {
@@ -370,46 +383,83 @@ func readViewerConfig() (map[string]any, string, error) {
 	return cfg, configPath, nil
 }
 
-func readLLMConfigPayload() (llmConfigPayload, string, error) {
+func readLLMConfigPayload() (llmConfigPayload, []llmConfigPayload, string, error) {
 	cfg, configPath, err := readViewerConfig()
 	if err != nil {
-		return llmConfigPayload{}, "", err
+		return llmConfigPayload{}, nil, "", err
 	}
 	payload := llmConfigPayload{UseAnthropic: true}
+	var providers []llmConfigPayload
 	if llmSection, ok := cfg["llm"].(map[string]any); ok {
-		if value, ok := llmSection["url"].(string); ok {
-			payload.URL = value
-		}
-		if value, ok := llmSection["auth_token"].(string); ok {
-			payload.AuthToken = value
-		}
-		if value, ok := llmSection["model"].(string); ok {
-			payload.Model = value
-		}
-		if value, ok := llmSection["use_anthropic"].(bool); ok {
-			payload.UseAnthropic = value
-		}
-		if value, ok := llmSection["extra_body"]; ok && value != nil {
-			if data, err := json.MarshalIndent(value, "", "  "); err == nil {
-				payload.ExtraBody = string(data)
+		payload = llmPayloadFromMap(llmSection)
+		if providerValues, ok := llmSection["providers"].([]any); ok {
+			for _, item := range providerValues {
+				if provider, ok := item.(map[string]any); ok {
+					providers = append(providers, llmPayloadFromMap(provider))
+				}
 			}
 		}
 	}
-	return payload, configPath, nil
+	if len(providers) == 0 && payload.URL != "" && payload.AuthToken != "" && payload.Model != "" {
+		providers = append(providers, payload)
+	}
+	return payload, providers, configPath, nil
+}
+
+func llmPayloadFromMap(values map[string]any) llmConfigPayload {
+	payload := llmConfigPayload{UseAnthropic: true}
+	if value, ok := values["name"].(string); ok {
+		payload.Name = value
+	}
+	if value, ok := values["url"].(string); ok {
+		payload.URL = value
+	}
+	if value, ok := values["auth_token"].(string); ok {
+		payload.AuthToken = value
+		payload.HasAuthToken = strings.TrimSpace(value) != ""
+	}
+	if value, ok := values["model"].(string); ok {
+		payload.Model = value
+	}
+	if value, ok := values["use_anthropic"].(bool); ok {
+		payload.UseAnthropic = value
+	}
+	if value, ok := values["extra_body"]; ok && value != nil {
+		if data, err := json.MarshalIndent(value, "", "  "); err == nil {
+			payload.ExtraBody = string(data)
+		}
+	}
+	return payload
+}
+
+func redactLLMConfigPayload(payload llmConfigPayload) llmConfigPayload {
+	payload.HasAuthToken = strings.TrimSpace(payload.AuthToken) != "" || payload.HasAuthToken
+	payload.AuthToken = ""
+	return payload
+}
+
+func redactLLMConfigProviders(providers []llmConfigPayload) []llmConfigPayload {
+	redacted := make([]llmConfigPayload, len(providers))
+	for i, provider := range providers {
+		redacted[i] = redactLLMConfigPayload(provider)
+	}
+	return redacted
 }
 
 func handleLLMConfigAPI(w http.ResponseWriter, _ *http.Request) {
-	payload, configPath, err := readLLMConfigPayload()
+	payload, providers, configPath, err := readLLMConfigPayload()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	response := llmConfigResponse{
-		Config:     payload,
+		Config:     redactLLMConfigPayload(payload),
+		Providers:  redactLLMConfigProviders(providers),
 		ConfigPath: configPath,
-		Configured: payload.URL != "" && payload.AuthToken != "" && payload.Model != "",
+		Configured: len(providers) > 0,
 	}
-	if endpoint, err := llm.ResolveEndpoint(configPath); err == nil {
+	if endpoints, err := llm.ResolveEndpoints(configPath); err == nil && len(endpoints) > 0 {
+		endpoint := endpoints[0]
 		response.ResolvedURL = endpoint.URL
 		response.ResolvedVia = endpoint.Source
 		response.Protocol = endpoint.Protocol
@@ -418,40 +468,45 @@ func handleLLMConfigAPI(w http.ResponseWriter, _ *http.Request) {
 }
 
 func handleSaveLLMConfigAPI(w http.ResponseWriter, r *http.Request) {
-	var req llmConfigPayload
+	var req struct {
+		llmConfigPayload
+		Providers []llmConfigPayload `json:"providers"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
 		return
 	}
-	req.URL = normalizeConfigString(req.URL)
-	req.AuthToken = normalizeConfigString(req.AuthToken)
-	req.Model = normalizeConfigString(req.Model)
-	req.ExtraBody = strings.TrimSpace(req.ExtraBody)
-	if req.URL == "" || req.AuthToken == "" || req.Model == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url, auth token, and model are required"})
-		return
+	providers := req.Providers
+	if len(providers) == 0 {
+		providers = []llmConfigPayload{req.llmConfigPayload}
 	}
-
 	cfg, configPath, err := readViewerConfig()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	oldProviders := existingLLMProviders(cfg)
 
-	llmSection := map[string]any{
-		"url":           req.URL,
-		"auth_token":    req.AuthToken,
-		"model":         req.Model,
-		"use_anthropic": req.UseAnthropic,
-	}
-	if req.ExtraBody != "" {
-		var extraBody map[string]any
-		if err := json.Unmarshal([]byte(req.ExtraBody), &extraBody); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid extraBody json: %v", err)})
+	providerSections := make([]map[string]any, 0, len(providers))
+	for i := range providers {
+		providers[i].AuthToken = strings.TrimSpace(providers[i].AuthToken)
+		if providers[i].AuthToken == "" {
+			providers[i].AuthToken = existingLLMAuthToken(oldProviders, providers[i], i)
+		}
+		section, err := llmPayloadToConfigMap(providers[i])
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		llmSection["extra_body"] = extraBody
+		providerSections = append(providerSections, section)
 	}
+	if len(providerSections) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one model provider is required"})
+		return
+	}
+
+	llmSection := cloneConfigMap(providerSections[0])
+	llmSection["providers"] = providerSections
 	cfg["llm"] = llmSection
 
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -469,6 +524,85 @@ func handleSaveLLMConfigAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handleLLMConfigAPI(w, r)
+}
+
+func existingLLMProviders(cfg map[string]any) []llmConfigPayload {
+	llmSection, ok := cfg["llm"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	var providers []llmConfigPayload
+	if providerValues, ok := llmSection["providers"].([]any); ok {
+		for _, item := range providerValues {
+			if provider, ok := item.(map[string]any); ok {
+				providers = append(providers, llmPayloadFromMap(provider))
+			}
+		}
+	}
+	if len(providers) == 0 {
+		payload := llmPayloadFromMap(llmSection)
+		if payload.AuthToken != "" || payload.URL != "" || payload.Model != "" {
+			providers = append(providers, payload)
+		}
+	}
+	return providers
+}
+
+func existingLLMAuthToken(existing []llmConfigPayload, incoming llmConfigPayload, index int) string {
+	if index >= 0 && index < len(existing) && sameLLMProviderIdentity(existing[index], incoming) {
+		return existing[index].AuthToken
+	}
+	for _, provider := range existing {
+		if sameLLMProviderIdentity(provider, incoming) {
+			return provider.AuthToken
+		}
+	}
+	return ""
+}
+
+func sameLLMProviderIdentity(existing, incoming llmConfigPayload) bool {
+	existingName := normalizeConfigString(existing.Name)
+	incomingName := normalizeConfigString(incoming.Name)
+	if existingName != "" && incomingName != "" && existingName == incomingName {
+		return true
+	}
+	return normalizeConfigString(existing.URL) == normalizeConfigString(incoming.URL) && normalizeConfigString(existing.Model) == normalizeConfigString(incoming.Model)
+}
+
+func cloneConfigMap(values map[string]any) map[string]any {
+	cloned := make(map[string]any, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func llmPayloadToConfigMap(payload llmConfigPayload) (map[string]any, error) {
+	payload.Name = normalizeConfigString(payload.Name)
+	payload.URL = normalizeConfigString(payload.URL)
+	payload.AuthToken = normalizeConfigString(payload.AuthToken)
+	payload.Model = normalizeConfigString(payload.Model)
+	payload.ExtraBody = strings.TrimSpace(payload.ExtraBody)
+	if payload.URL == "" || payload.AuthToken == "" || payload.Model == "" {
+		return nil, fmt.Errorf("url, auth token, and model are required for each provider")
+	}
+	section := map[string]any{
+		"url":           payload.URL,
+		"auth_token":    payload.AuthToken,
+		"model":         payload.Model,
+		"use_anthropic": payload.UseAnthropic,
+	}
+	if payload.Name != "" {
+		section["name"] = payload.Name
+	}
+	if payload.ExtraBody != "" {
+		var extraBody map[string]any
+		if err := json.Unmarshal([]byte(payload.ExtraBody), &extraBody); err != nil {
+			return nil, fmt.Errorf("invalid extraBody json: %v", err)
+		}
+		section["extra_body"] = extraBody
+	}
+	return section, nil
 }
 
 func validatePathValue(value string) bool {
@@ -1294,10 +1428,11 @@ func handleRulesAPI(w http.ResponseWriter, _ *http.Request, root string) {
 		{
 			Priority:    1,
 			Source:      "custom",
-			Title:       "--rule flag",
+			Title:       "Task rule file (--rule)",
 			Path:        "Specified when creating a review task",
-			Description: "Highest priority. Applies only to review tasks that pass a custom rule file path.",
-			Available:   false,
+			Description: "Highest priority. Web audit templates map to this layer by passing rules/security.json, rules/quality.json, rules/performance.json, or rules/architecture.json as --rule.",
+			Summary:     "Active when a review task selects a specialized audit template or a custom rule path.",
+			Available:   true,
 		},
 		{
 			Priority:    2,
@@ -1320,7 +1455,8 @@ func handleRulesAPI(w http.ResponseWriter, _ *http.Request, root string) {
 			Source:      "system",
 			Title:       "System defaults",
 			Path:        "embedded:system_rules.json",
-			Description: "Built-in fallback rules used when higher-priority layers do not match.",
+			Description: "Built-in fallback rules used when P1/P2/P3 do not match. This layer stays short and high-confidence to avoid overloading the LLM.",
+			Summary:     "Covers correctness, security, performance, reliability, and critical test gaps; excludes style-only, spelling-only, preference-only, and broad best-practice findings.",
 			Available:   true,
 			DefaultRule: systemRule.DefaultRule,
 			PathRules:   make([]systemRuleEntry, 0, len(systemRule.PathRules)),
@@ -1381,7 +1517,56 @@ func handleRulesAPI(w http.ResponseWriter, _ *http.Request, root string) {
 		layers = append(layers[:2], append(projectRules, layers[2:]...)...)
 	}
 
-	writeJSON(w, http.StatusOK, rulesOverviewResponse{Layers: layers})
+	writeJSON(w, http.StatusOK, rulesOverviewResponse{
+		Layers:        layers,
+		Optimizations: rulesOptimizationSummaries(),
+	})
+}
+
+func rulesOptimizationSummaries() []ruleOptimizationSummary {
+	return []ruleOptimizationSummary{
+		{
+			Title:       "P1 template rule narrowing",
+			Stage:       "Before review dispatch",
+			Description: "Specialized audit templates are passed through P1 as --rule files, then use fileHints and maxFiles to reduce the candidate file set before LLM review starts.",
+			Source:      "rules/security.json, rules/quality.json, rules/performance.json, rules/architecture.json",
+			Details: []string{
+				"P1 priority is reused; no parallel rule chain is added.",
+				"Path hints and lightweight content hints are both used for scoring.",
+				"When no hint matches, the system falls back to existing filtered files.",
+			},
+		},
+		{
+			Title:       "Lightweight RAG context",
+			Stage:       "Per-file prompt assembly",
+			Description: "Each file review receives only the most related changed files instead of the full change list.",
+			Source:      "internal/agent/agent.go, internal/agent/file_index.go",
+			Details: []string{
+				"Related context is capped at 8 files per reviewed file.",
+				"The {{rag_context}} placeholder and {{change_files}} both receive this narrowed context.",
+			},
+		},
+		{
+			Title:       "Code summary cache",
+			Stage:       "Lightweight index build",
+			Description: "The index reads only the first 32KB of each candidate file and caches extracted declarations by size and mtime.",
+			Source:      "~/.opencodereview/cache/light-index/*.json",
+			Details: []string{
+				"Summaries include function, type, class, interface, export, router, and route declarations.",
+				"Unchanged files reuse cached summaries on later audits.",
+			},
+		},
+		{
+			Title:       "Slim default prompts",
+			Stage:       "Template loading",
+			Description: "Long default system prompts were moved into concise template files, keeping dynamic audit rules in user prompts.",
+			Source:      "internal/config/template/task_template.json",
+			Details: []string{
+				"System prompts now hold only stable role and hard constraints.",
+				"Audit rules, RAG context, diffs, plan guidance, and tools stay in user prompts.",
+			},
+		},
+	}
 }
 
 func handleRepoStatusAPI(w http.ResponseWriter, _ *http.Request, root, repo string) {
@@ -1672,23 +1857,23 @@ func handleCreateReviewTaskAPI(w http.ResponseWriter, r *http.Request, root stri
 	}
 	taskID := fmt.Sprintf("review-%d", time.Now().UnixNano())
 	task := &reviewTaskResponse{
-		TaskID:      taskID,
-		EncodedRepo: repoInfo.EncodedPath,
-		RepoName:    repoInfo.DisplayName,
-		RepoPath:    repoInfo.RepoPath,
-		Branch:      req.EncodedBranch,
-		ReviewMode:  req.ReviewMode,
-		BaseRef:     req.BaseRef,
-		TargetRef:   req.TargetRef,
-		CommitRef:   req.CommitRef,
-		Background:  req.Background,
-		Format:      req.Format,
-		Timeout:     req.Timeout,
-		Concurrency: req.Concurrency,
-		RulePath:    req.RulePath,
+		TaskID:       taskID,
+		EncodedRepo:  repoInfo.EncodedPath,
+		RepoName:     repoInfo.DisplayName,
+		RepoPath:     repoInfo.RepoPath,
+		Branch:       req.EncodedBranch,
+		ReviewMode:   req.ReviewMode,
+		BaseRef:      req.BaseRef,
+		TargetRef:    req.TargetRef,
+		CommitRef:    req.CommitRef,
+		Background:   req.Background,
+		Format:       req.Format,
+		Timeout:      req.Timeout,
+		Concurrency:  req.Concurrency,
+		RulePath:     req.RulePath,
 		TemplateName: req.TemplateName,
-		Status:      "running",
-		StartedAt:   time.Now(),
+		Status:       "running",
+		StartedAt:    time.Now(),
 	}
 	reviewTaskStore.Lock()
 	reviewTaskStore.tasks[taskID] = task

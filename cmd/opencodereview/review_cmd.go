@@ -84,13 +84,16 @@ func runReview(args []string) error {
 		tpl.ApplyLanguage(appCfg.Language)
 	}
 
-	ep, err := llm.ResolveEndpoint(cfgPath)
+	endpoints, err := llm.ResolveEndpoints(cfgPath)
 	if err != nil {
 		return fmt.Errorf("resolve LLM endpoint: %w", err)
 	}
+	if len(endpoints) == 0 {
+		return fmt.Errorf("resolve LLM endpoint: no valid LLM endpoint configured")
+	}
 
-	llmClient := llm.NewLLMClient(ep)
-	model := ep.Model
+	llmClient := llm.NewFallbackClient(endpoints)
+	model := endpoints[0].Model
 
 	gitRunner := gitcmd.New(opts.maxGitProcs)
 
@@ -222,14 +225,14 @@ func requireGitRepo(dir string) error {
 func runPreview(repoDir string, opts reviewOptions, fileFilter *rules.FileFilter) error {
 	gitRunner := gitcmd.New(opts.maxGitProcs)
 	ag := agent.New(agent.Args{
-		RepoDir:    repoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		ReviewMode: reviewModeFromOptions(opts),
-		FileFilter: fileFilter,
-		GitRunner:  gitRunner,
-		RulePath:   opts.rulePath,
+		RepoDir:      repoDir,
+		From:         opts.from,
+		To:           opts.to,
+		Commit:       opts.commit,
+		ReviewMode:   reviewModeFromOptions(opts),
+		FileFilter:   fileFilter,
+		GitRunner:    gitRunner,
+		RulePath:     opts.rulePath,
 		TemplateName: opts.template,
 	})
 

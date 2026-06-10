@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -81,6 +83,18 @@ func templateReplaceOnce(content string, replacements map[string]string) string 
 		content = content[closeIdx:]
 	}
 	return sb.String()
+}
+
+func planTemplateReplacements(currentDate, rule, relatedContext, rawDiff, background, planTools string) map[string]string {
+	return map[string]string{
+		"{{current_system_date_time}}": currentDate,
+		"{{system_rule}}":              rule,
+		"{{change_files}}":             relatedContext,
+		"{{rag_context}}":              relatedContext,
+		"{{diff}}":                     rawDiff,
+		"{{requirement_background}}":   background,
+		"{{plan_tools}}":               planTools,
+	}
 }
 
 // Args holds all dependencies and configuration needed to run a review session.
@@ -204,6 +218,7 @@ type compressionJob struct {
 type Agent struct {
 	args                  Args
 	diffs                 []model.Diff // parsed diffs
+	lightIndex            lightFileIndex
 	totalInsertions       int64
 	totalDeletions        int64
 	currentDate           string
@@ -318,10 +333,10 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	a.args.Tools.Freeze()
 
 	totalChanged := len(a.diffs)
-	reviewCount := a.countReviewable(a.diffs)
-	fmt.Fprintf(stdout.Writer(), "[ocr] %d file(s) changed, reviewing %d in %s\n", totalChanged, reviewCount, a.args.RepoDir)
-
 	a.diffs = a.filterDiffs(a.diffs)
+	a.lightIndex = a.buildLightFileIndex(a.diffs, a.templateFileHints())
+	reviewCount := len(a.diffs)
+	fmt.Fprintf(stdout.Writer(), "[ocr] %d file(s) changed, reviewing %d in %s\n", totalChanged, reviewCount, a.args.RepoDir)
 
 	if len(a.diffs) == 0 {
 		fmt.Fprintln(stdout.Writer(), "[ocr] No supported files changed. Skipping review.")
@@ -557,9 +572,9 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 	}
 
 	newPath := d.NewPath
+	promptDiff := a.promptDiff(d)
 
-	// Build change-files list excluding current file
-	changeFilesExcludingCurrent := a.buildChangeFilesExcept(newPath)
+	relatedChangeContext := a.buildRelatedChangeContext(newPath, d.Diff)
 
 	rule := a.resolveSystemRule(strings.ToLower(newPath))
 
@@ -576,7 +591,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 			telemetry.AnyToAttr("threshold", threshold))
 	} else if a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 {
 		var err error
-		planResult, err = a.executePlanPhase(ctx, newPath, d.Diff, changeFilesExcludingCurrent, rule)
+		planResult, err = a.executePlanPhase(ctx, newPath, promptDiff, relatedChangeContext, rule)
 		if err != nil {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Plan phase failed for %s: %v (continuing without plan)\n", newPath, err)
 			telemetry.Eventf(ctx, "plan.failed", err.Error(),
@@ -596,12 +611,13 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 	// Build a replacement map; keys must be replaced in a single pass
 	// so that substituted values containing other tokens are never expanded again.
 	replacements := map[string]string{
-		"{{current_system_date_time}}":   a.currentDate,
-		"{{system_rule}}":                rule,
-		"{{change_files}}":               changeFilesExcludingCurrent,
-		"{{diff}}":                       d.Diff,
-		"{{requirement_background}}":     a.args.Background,
-		"{{plan_guidance}}":              planResult,
+		"{{current_system_date_time}}": a.currentDate,
+		"{{system_rule}}":              rule,
+		"{{change_files}}":             relatedChangeContext,
+		"{{rag_context}}":              relatedChangeContext,
+		"{{diff}}":                     promptDiff,
+		"{{requirement_background}}":   a.args.Background,
+		"{{plan_guidance}}":            planResult,
 	}
 
 	for _, m := range rawMsgs {
@@ -638,6 +654,101 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 	return a.performLlmCodeReview(ctx, messages, newPath)
 }
 
+func (a *Agent) promptDiff(d model.Diff) string {
+	if a.args.FileFilter == nil || a.args.FileFilter.MaxDiffBytes <= 0 || len(d.Diff) <= a.args.FileFilter.MaxDiffBytes {
+		return d.Diff
+	}
+	return compactDiffForPrompt(effectivePath(d), d.Diff, a.args.FileFilter.MaxDiffBytes)
+}
+
+func compactDiffForPrompt(path, rawDiff string, maxBytes int) string {
+	if maxBytes <= 0 || len(rawDiff) <= maxBytes {
+		return rawDiff
+	}
+	if maxBytes < 1200 {
+		maxBytes = 1200
+	}
+
+	lines := strings.Split(rawDiff, "\n")
+	headerLines := make([]string, 0, 8)
+	hunkLines := make([]string, 0, 24)
+	for _, line := range lines {
+		if strings.HasPrefix(line, "diff --git ") || strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
+			headerLines = append(headerLines, line)
+			continue
+		}
+		if strings.HasPrefix(line, "@@") || strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") {
+			hunkLines = append(hunkLines, line)
+		}
+	}
+
+	if len(hunkLines) == 0 {
+		return rawDiff[:maxBytes] + "\n... diff truncated for template-focused review ..."
+	}
+
+	budget := maxBytes - 320
+	if budget < 800 {
+		budget = 800
+	}
+	headBudget := budget / 2
+	tailBudget := budget - headBudget
+	head := takeLinesWithinBytes(hunkLines, headBudget)
+	tail := takeLinesWithinBytesFromEnd(hunkLines, tailBudget)
+
+	var sb strings.Builder
+	sb.WriteString("Diff compacted for template-focused review. Full diff remains available through file_read_diff.\n")
+	sb.WriteString("File: ")
+	sb.WriteString(path)
+	sb.WriteString("\nOriginal bytes: ")
+	sb.WriteString(strconv.Itoa(len(rawDiff)))
+	sb.WriteString("\n\n")
+	for _, line := range headerLines {
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+	for _, line := range head {
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("... middle of diff omitted ...\n")
+	for _, line := range tail {
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func takeLinesWithinBytes(lines []string, maxBytes int) []string {
+	selected := make([]string, 0, len(lines))
+	used := 0
+	for _, line := range lines {
+		lineBytes := len(line) + 1
+		if used > 0 && used+lineBytes > maxBytes {
+			break
+		}
+		selected = append(selected, line)
+		used += lineBytes
+	}
+	return selected
+}
+
+func takeLinesWithinBytesFromEnd(lines []string, maxBytes int) []string {
+	selected := make([]string, 0, len(lines))
+	used := 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		lineBytes := len(lines[i]) + 1
+		if used > 0 && used+lineBytes > maxBytes {
+			break
+		}
+		selected = append(selected, lines[i])
+		used += lineBytes
+	}
+	for i, j := 0, len(selected)-1; i < j; i, j = i+1, j-1 {
+		selected[i], selected[j] = selected[j], selected[i]
+	}
+	return selected
+}
+
 // buildChangeFilesExcept returns a formatted list of changed files except the given path.
 func (a *Agent) buildChangeFilesExcept(excludePath string) string {
 	var sb strings.Builder
@@ -663,6 +774,144 @@ func (a *Agent) buildChangeFilesExcept(excludePath string) string {
 		}
 	}
 	return sb.String()
+}
+
+const maxRagRelatedFiles = 8
+
+func (a *Agent) buildRelatedChangeContext(currentPath, currentDiff string) string {
+	type relatedFile struct {
+		path    string
+		status  string
+		summary string
+		score   int
+		index   int
+	}
+
+	currentTerms := extractRagTerms(currentPath + "\n" + currentDiff)
+	items := make([]relatedFile, 0, len(a.diffs))
+	for i, d := range a.diffs {
+		path := effectivePath(d)
+		if path == currentPath || d.IsBinary {
+			continue
+		}
+		entry := a.lightIndex[path]
+		summary := entry.Summary
+		if summary == "" {
+			summary = filepathBase(path)
+		}
+		score := scoreRagRelated(path+"\n"+summary, currentTerms)
+		items = append(items, relatedFile{path: path, status: ragDiffStatus(d), summary: summary, score: score, index: i})
+	}
+
+	if len(items) == 0 {
+		return ""
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].score != items[j].score {
+			return items[i].score > items[j].score
+		}
+		return items[i].index < items[j].index
+	})
+	if len(items) > maxRagRelatedFiles {
+		items = items[:maxRagRelatedFiles]
+	}
+
+	var sb strings.Builder
+	for i, item := range items {
+		sb.WriteString(item.status + "   " + item.path)
+		if item.summary != "" {
+			sb.WriteString("\n  summary: ")
+			sb.WriteString(compactSummary(item.summary))
+		}
+		if i < len(items)-1 {
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String()
+}
+
+func (a *Agent) templateFileHints() []string {
+	if a.args.FileFilter == nil {
+		return nil
+	}
+	hints := make([]string, 0, len(a.args.FileFilter.FileHints)+len(a.args.FileFilter.SkipHints))
+	hints = append(hints, a.args.FileFilter.FileHints...)
+	hints = append(hints, a.args.FileFilter.SkipHints...)
+	return hints
+}
+
+func ragDiffStatus(d model.Diff) string {
+	switch {
+	case d.IsNew:
+		return "ADDED"
+	case d.IsDeleted:
+		return "DELETED"
+	case d.OldPath != "" && d.OldPath != d.NewPath:
+		return "RENAMED"
+	default:
+		return "MODIFIED"
+	}
+}
+
+func extractRagTerms(content string) []string {
+	parts := strings.FieldsFunc(strings.ToLower(content), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '_'
+	})
+	terms := make([]string, 0, 32)
+	seen := make(map[string]struct{}, 32)
+	for _, part := range parts {
+		part = strings.Trim(part, "_")
+		if len(part) < 4 || isCommonRagTerm(part) {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		terms = append(terms, part)
+		if len(terms) >= 32 {
+			break
+		}
+	}
+	return terms
+}
+
+func scoreRagRelated(content string, terms []string) int {
+	if len(terms) == 0 {
+		return 0
+	}
+	lower := strings.ToLower(content)
+	score := 0
+	for _, term := range terms {
+		if strings.Contains(lower, term) {
+			score++
+		}
+	}
+	return score
+}
+
+func compactSummary(summary string) string {
+	summary = strings.Join(strings.Fields(summary), " ")
+	if len(summary) <= 240 {
+		return summary
+	}
+	return summary[:240] + "..."
+}
+
+func filepathBase(path string) string {
+	if idx := strings.LastIndex(path, "/"); idx >= 0 {
+		return path[idx+1:]
+	}
+	return path
+}
+
+func isCommonRagTerm(term string) bool {
+	switch term {
+	case "package", "import", "return", "const", "function", "string", "error", "true", "false", "null", "undefined", "diff", "index":
+		return true
+	default:
+		return false
+	}
 }
 
 // resolveSystemRule returns the rule text for a given file path,
@@ -743,7 +992,99 @@ func (a *Agent) filterDiffs(diffs []model.Diff) []model.Diff {
 	if skipped > 0 {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Filtered %d file(s) by include/exclude rules\n", skipped)
 	}
-	return kept
+	return a.filterByTemplateHints(kept)
+}
+
+func (a *Agent) filterByTemplateHints(diffs []model.Diff) []model.Diff {
+	f := a.args.FileFilter
+	if f == nil || (!f.HasFileHints() && !f.HasSkipHints() && f.MinHintScore <= 0 && f.MaxFiles <= 0) {
+		return diffs
+	}
+
+	type scoredDiff struct {
+		diff  model.Diff
+		score int
+		index int
+	}
+
+	fileIndex := a.buildLightFileIndex(diffs, a.templateFileHints())
+	scored := make([]scoredDiff, 0, len(diffs))
+	matched := 0
+	minHintScore := f.MinHintScore
+	if minHintScore <= 0 && f.HasFileHints() {
+		minHintScore = 1
+	}
+	for i, d := range diffs {
+		path := effectivePath(d)
+		score := f.FileHintScore(path)
+		if entry, ok := fileIndex[path]; ok {
+			score = max(score, countConfiguredHintMatches(entry.HintMatches, f.FileHints))
+			if f.HasSkipHints() {
+				score -= max(f.SkipHintScore(path), countConfiguredHintMatches(entry.HintMatches, f.SkipHints))
+			}
+		}
+		if minHintScore <= 0 || score >= minHintScore {
+			matched++
+		}
+		scored = append(scored, scoredDiff{diff: d, score: score, index: i})
+	}
+
+	if f.HasFileHints() && matched == 0 {
+		fmt.Fprintln(stdout.Writer(), "[ocr] Template file hints matched no files; using existing filtered files")
+		return limitTemplateFiles(diffs, f.MaxFiles)
+	}
+
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		return scored[i].index < scored[j].index
+	})
+
+	var narrowed []model.Diff
+	for _, item := range scored {
+		if f.HasFileHints() && item.score < minHintScore {
+			continue
+		}
+		narrowed = append(narrowed, item.diff)
+	}
+	if len(narrowed) == 0 {
+		narrowed = diffs
+	}
+	narrowed = limitTemplateFiles(narrowed, f.MaxFiles)
+
+	if len(narrowed) < len(diffs) {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Template file hints selected %d of %d file(s)\n", len(narrowed), len(diffs))
+	}
+	return narrowed
+}
+
+func countConfiguredHintMatches(matches []string, hints []string) int {
+	if len(matches) == 0 || len(hints) == 0 {
+		return 0
+	}
+	configured := make(map[string]struct{}, len(hints))
+	for _, hint := range hints {
+		hint = strings.ToLower(strings.TrimSpace(hint))
+		if hint != "" {
+			configured[hint] = struct{}{}
+		}
+	}
+	count := 0
+	for _, match := range matches {
+		match = strings.ToLower(strings.TrimSpace(match))
+		if _, ok := configured[match]; ok {
+			count++
+		}
+	}
+	return count
+}
+
+func limitTemplateFiles(diffs []model.Diff, maxFiles int) []model.Diff {
+	if maxFiles <= 0 || len(diffs) <= maxFiles {
+		return diffs
+	}
+	return diffs[:maxFiles]
 }
 
 // extFromPath returns the file extension with leading dot, lowercased.
@@ -765,14 +1106,14 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 	pt := a.args.Template.PlanTask
 	messages := make([]llm.Message, 0, len(pt.Messages))
 
-	planReplacements := map[string]string{
-		"{{current_system_date_time}}": a.currentDate,
-		"{{system_rule}}":              rule,
-		"{{change_files}}":             changeFiles,
-		"{{diff}}":                     rawDiff,
-		"{{requirement_background}}":   a.args.Background,
-		"{{plan_tools}}":               formatToolDefs(a.args.PlanToolDefs),
-	}
+	planReplacements := planTemplateReplacements(
+		a.currentDate,
+		rule,
+		changeFiles,
+		rawDiff,
+		a.args.Background,
+		formatToolDefs(a.args.PlanToolDefs),
+	)
 
 	for _, m := range pt.Messages {
 		content := m.Content

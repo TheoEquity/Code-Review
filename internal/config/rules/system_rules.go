@@ -182,16 +182,27 @@ type ProjectRuleEntry struct {
 
 // ProjectRule holds rules loaded from <repoDir>/.opencodereview/rule.json.
 type ProjectRule struct {
-	Rules   []ProjectRuleEntry `json:"rules"`
-	Include []string           `json:"include,omitempty"`
-	Exclude []string           `json:"exclude,omitempty"`
+	DefaultRule  string             `json:"defaultRule,omitempty"`
+	Rules        []ProjectRuleEntry `json:"rules"`
+	Include      []string           `json:"include,omitempty"`
+	Exclude      []string           `json:"exclude,omitempty"`
+	FileHints    []string           `json:"fileHints,omitempty"`
+	SkipHints    []string           `json:"skipHints,omitempty"`
+	MinHintScore int                `json:"minHintScore,omitempty"`
+	MaxDiffBytes int                `json:"maxDiffBytes,omitempty"`
+	MaxFiles     int                `json:"maxFiles,omitempty"`
 }
 
 // FileFilter holds the merged user-configured include/exclude glob patterns
 // collected from all rule.json layers (custom, project, global).
 type FileFilter struct {
-	Include []string
-	Exclude []string
+	Include      []string
+	Exclude      []string
+	FileHints    []string
+	SkipHints    []string
+	MinHintScore int
+	MaxDiffBytes int
+	MaxFiles     int
 }
 
 // HasInclude reports whether any include patterns are configured.
@@ -229,6 +240,46 @@ func (f *FileFilter) IsUserIncluded(path string) bool {
 		}
 	}
 	return false
+}
+
+// HasFileHints reports whether template-specific path hints are configured.
+func (f *FileFilter) HasFileHints() bool {
+	return len(f.FileHints) > 0
+}
+
+// HasSkipHints reports whether template-specific low-signal hints are configured.
+func (f *FileFilter) HasSkipHints() bool {
+	return len(f.SkipHints) > 0
+}
+
+// SkipHintScore returns how strongly a path matches template-specific skip hints.
+func (f *FileFilter) SkipHintScore(path string) int {
+	lowerPath := strings.ToLower(path)
+	score := 0
+	for _, hint := range f.SkipHints {
+		if hint == "" {
+			continue
+		}
+		if strings.Contains(lowerPath, hint) {
+			score++
+		}
+	}
+	return score
+}
+
+// FileHintScore returns how strongly a path matches template-specific hints.
+func (f *FileFilter) FileHintScore(path string) int {
+	lowerPath := strings.ToLower(path)
+	score := 0
+	for _, hint := range f.FileHints {
+		if hint == "" {
+			continue
+		}
+		if strings.Contains(lowerPath, hint) {
+			score++
+		}
+	}
+	return score
 }
 
 // composedResolver implements Resolver with layered priority.
@@ -287,7 +338,7 @@ func buildFileFilter(layers ...*ProjectRule) *FileFilter {
 		if pr == nil {
 			continue
 		}
-		if len(pr.Include) == 0 && len(pr.Exclude) == 0 {
+		if len(pr.Include) == 0 && len(pr.Exclude) == 0 && len(pr.FileHints) == 0 && len(pr.SkipHints) == 0 && pr.MinHintScore <= 0 && pr.MaxDiffBytes <= 0 && pr.MaxFiles <= 0 {
 			continue
 		}
 		f := &FileFilter{}
@@ -297,6 +348,15 @@ func buildFileFilter(layers ...*ProjectRule) *FileFilter {
 		for _, p := range pr.Exclude {
 			f.Exclude = append(f.Exclude, strings.ToLower(p))
 		}
+		for _, hint := range pr.FileHints {
+			f.FileHints = append(f.FileHints, strings.ToLower(hint))
+		}
+		for _, hint := range pr.SkipHints {
+			f.SkipHints = append(f.SkipHints, strings.ToLower(hint))
+		}
+		f.MinHintScore = pr.MinHintScore
+		f.MaxDiffBytes = pr.MaxDiffBytes
+		f.MaxFiles = pr.MaxFiles
 		return f
 	}
 	return nil
@@ -390,7 +450,7 @@ func matchProjectRule(pr *ProjectRule, path string) string {
 			}
 		}
 	}
-	return ""
+	return pr.DefaultRule
 }
 
 func matchProjectRuleDetail(pr *ProjectRule, path, source string) *RuleDetail {
@@ -407,6 +467,9 @@ func matchProjectRuleDetail(pr *ProjectRule, path, source string) *RuleDetail {
 				return &RuleDetail{Rule: entry.Rule, Source: source, Pattern: entry.Path}
 			}
 		}
+	}
+	if pr.DefaultRule != "" {
+		return &RuleDetail{Rule: pr.DefaultRule, Source: source, Pattern: "default"}
 	}
 	return nil
 }

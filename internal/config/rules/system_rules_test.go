@@ -57,23 +57,23 @@ func TestResolve_DefaultRules(t *testing.T) {
 		path       string
 		wantSubstr string // substring that should appear in the matched rule
 	}{
-		{"src/main/java/com/example/foo.java", "Logic Error Detection"},
-		{"foo.java", "Logic Error Detection"},
-		{"src/main/resources/mapper/usermapper.xml", "SQL Logic Error Detection"},
-		{"src/main/resources/dao/userdao.xml", "SQL Logic Error Detection"},
+		{"src/main/java/com/example/foo.java", "Java High-Confidence Checks"},
+		{"foo.java", "Java High-Confidence Checks"},
+		{"src/main/resources/mapper/usermapper.xml", "Mapper/DAO XML High-Confidence Checks"},
+		{"src/main/resources/dao/userdao.xml", "Mapper/DAO XML High-Confidence Checks"},
 		{"pom.xml", "snapshot"},
 		{"submodule/pom.xml", "snapshot"},
-		{"src/main/resources/application.properties", "Configuration Error Detection"},
+		{"src/main/resources/application.properties", "Properties High-Confidence Checks"},
 		{"frontend/package.json", "latest"},
 		{"config/app.yaml", "yaml-key"},
 		{"deploy/values.yml", "yaml-key"},
 		{"src/components/app.tsx", "React"},
 		{"lib/utils.ts", "TypeScript"},
-		{"app.kt", "Null Safety"},
-		{"src/main/handler.cpp", "Smart Pointer"},
-		{"driver.c", "malloc"},
-		{"pages/Index.ets", "State Decorator"},
-		{"components/Button.ets", "State Decorator"},
+		{"app.kt", "Kotlin High-Confidence Checks"},
+		{"src/main/handler.cpp", "C++ High-Confidence Checks"},
+		{"driver.c", "C High-Confidence Checks"},
+		{"pages/Index.ets", "ArkTS High-Confidence Checks"},
+		{"components/Button.ets", "ArkTS High-Confidence Checks"},
 		{"entry/src/main/module.json5", "json-key"},
 		{"entry/oh-package.json5", "json-key"},
 	}
@@ -187,7 +187,7 @@ func TestNewResolver_DefaultOnly(t *testing.T) {
 		t.Fatalf("NewResolver: %v", err)
 	}
 	got := resolver.Resolve("src/main.java")
-	if !strings.Contains(got, "Logic Error Detection") {
+	if !strings.Contains(got, "Java High-Confidence Checks") {
 		t.Errorf("expected system default java rule, got %q", truncate(got, 80))
 	}
 }
@@ -226,7 +226,7 @@ func TestNewResolver_ProjectRuleHighestPriority(t *testing.T) {
 		want string
 	}{
 		{"force-api/src/foo.java", "project-java-rule"},
-		{"other/src/bar.java", "Logic Error Detection"},
+		{"other/src/bar.java", "Java High-Confidence Checks"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -402,8 +402,9 @@ func TestFileFilter_IsUserIncluded_EmptyInclude(t *testing.T) {
 
 func TestFileFilter_CaseInsensitive(t *testing.T) {
 	f := &FileFilter{
-		Include: []string{"src/**/*.java"},
-		Exclude: []string{"**/generated/**"},
+		Include:   []string{"src/**/*.java"},
+		Exclude:   []string{"**/generated/**"},
+		FileHints: []string{"auth"},
 	}
 
 	if !f.IsUserIncluded("SRC/Main/Foo.Java") {
@@ -411,6 +412,9 @@ func TestFileFilter_CaseInsensitive(t *testing.T) {
 	}
 	if !f.IsUserExcluded("SRC/Generated/Api.java") {
 		t.Errorf("expected case-insensitive exclude match")
+	}
+	if f.FileHintScore("SRC/Auth/Login.Java") == 0 {
+		t.Errorf("expected case-insensitive file hint match")
 	}
 }
 
@@ -420,7 +424,7 @@ func TestNewResolver_FileFilterMerged(t *testing.T) {
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	projJSON := `{"rules":[],"include":["src/**/*.java"],"exclude":["**/generated/**"]}`
+	projJSON := `{"rules":[],"include":["src/**/*.java"],"exclude":["**/generated/**"],"fileHints":["auth"],"skipHints":["docs"],"minHintScore":2,"maxDiffBytes":12000,"maxFiles":20}`
 	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(projJSON), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -441,6 +445,21 @@ func TestNewResolver_FileFilterMerged(t *testing.T) {
 	if !filter.IsUserExcluded("src/generated/api.java") {
 		t.Error("expected src/generated/api.java to be excluded")
 	}
+	if filter.FileHintScore("src/auth/login.java") == 0 {
+		t.Error("expected src/auth/login.java to match file hints")
+	}
+	if !filter.HasSkipHints() || filter.SkipHintScore("src/docs/login.java") == 0 {
+		t.Error("expected src/docs/login.java to match skip hints")
+	}
+	if filter.MinHintScore != 2 {
+		t.Errorf("expected MinHintScore 2, got %d", filter.MinHintScore)
+	}
+	if filter.MaxDiffBytes != 12000 {
+		t.Errorf("expected MaxDiffBytes 12000, got %d", filter.MaxDiffBytes)
+	}
+	if filter.MaxFiles != 20 {
+		t.Errorf("expected MaxFiles 20, got %d", filter.MaxFiles)
+	}
 }
 
 func TestNewResolver_FileFilterNilWhenEmpty(t *testing.T) {
@@ -450,6 +469,26 @@ func TestNewResolver_FileFilterNilWhenEmpty(t *testing.T) {
 	}
 	if filter != nil {
 		t.Errorf("expected nil FileFilter when no include/exclude configured, got %+v", filter)
+	}
+}
+
+func TestNewResolver_CustomDefaultRule(t *testing.T) {
+	customDir := t.TempDir()
+	customJSON := `{"defaultRule":"custom default rule","fileHints":["auth"]}`
+	customPath := filepath.Join(customDir, "custom.json")
+	if err := os.WriteFile(customPath, []byte(customJSON), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	resolver, filter, err := NewResolver(t.TempDir(), customPath)
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	if got := resolver.Resolve("src/main.go"); got != "custom default rule" {
+		t.Fatalf("Resolve() = %q, want custom default rule", got)
+	}
+	if filter == nil || filter.FileHintScore("src/auth/login.go") == 0 {
+		t.Fatal("expected custom file hints to be loaded")
 	}
 }
 
@@ -561,7 +600,7 @@ func TestResolveDetail_SystemPatternMatch(t *testing.T) {
 	if detail.Pattern != "**/*.java" {
 		t.Errorf("expected pattern '**/*.java', got %q", detail.Pattern)
 	}
-	if !strings.Contains(detail.Rule, "Logic Error Detection") {
+	if !strings.Contains(detail.Rule, "Java High-Confidence Checks") {
 		t.Errorf("expected java rule, got %q", truncate(detail.Rule, 80))
 	}
 }
