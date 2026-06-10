@@ -402,8 +402,9 @@ func TestFileFilter_IsUserIncluded_EmptyInclude(t *testing.T) {
 
 func TestFileFilter_CaseInsensitive(t *testing.T) {
 	f := &FileFilter{
-		Include: []string{"src/**/*.java"},
-		Exclude: []string{"**/generated/**"},
+		Include:   []string{"src/**/*.java"},
+		Exclude:   []string{"**/generated/**"},
+		FileHints: []string{"auth"},
 	}
 
 	if !f.IsUserIncluded("SRC/Main/Foo.Java") {
@@ -411,6 +412,9 @@ func TestFileFilter_CaseInsensitive(t *testing.T) {
 	}
 	if !f.IsUserExcluded("SRC/Generated/Api.java") {
 		t.Errorf("expected case-insensitive exclude match")
+	}
+	if f.FileHintScore("SRC/Auth/Login.Java") == 0 {
+		t.Errorf("expected case-insensitive file hint match")
 	}
 }
 
@@ -420,7 +424,7 @@ func TestNewResolver_FileFilterMerged(t *testing.T) {
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	projJSON := `{"rules":[],"include":["src/**/*.java"],"exclude":["**/generated/**"]}`
+	projJSON := `{"rules":[],"include":["src/**/*.java"],"exclude":["**/generated/**"],"fileHints":["auth"],"maxFiles":20}`
 	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(projJSON), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -441,6 +445,12 @@ func TestNewResolver_FileFilterMerged(t *testing.T) {
 	if !filter.IsUserExcluded("src/generated/api.java") {
 		t.Error("expected src/generated/api.java to be excluded")
 	}
+	if filter.FileHintScore("src/auth/login.java") == 0 {
+		t.Error("expected src/auth/login.java to match file hints")
+	}
+	if filter.MaxFiles != 20 {
+		t.Errorf("expected MaxFiles 20, got %d", filter.MaxFiles)
+	}
 }
 
 func TestNewResolver_FileFilterNilWhenEmpty(t *testing.T) {
@@ -450,6 +460,26 @@ func TestNewResolver_FileFilterNilWhenEmpty(t *testing.T) {
 	}
 	if filter != nil {
 		t.Errorf("expected nil FileFilter when no include/exclude configured, got %+v", filter)
+	}
+}
+
+func TestNewResolver_CustomDefaultRule(t *testing.T) {
+	customDir := t.TempDir()
+	customJSON := `{"defaultRule":"custom default rule","fileHints":["auth"]}`
+	customPath := filepath.Join(customDir, "custom.json")
+	if err := os.WriteFile(customPath, []byte(customJSON), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	resolver, filter, err := NewResolver(t.TempDir(), customPath)
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	if got := resolver.Resolve("src/main.go"); got != "custom default rule" {
+		t.Fatalf("Resolve() = %q, want custom default rule", got)
+	}
+	if filter == nil || filter.FileHintScore("src/auth/login.go") == 0 {
+		t.Fatal("expected custom file hints to be loaded")
 	}
 }
 

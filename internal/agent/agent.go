@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -318,10 +319,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	a.args.Tools.Freeze()
 
 	totalChanged := len(a.diffs)
-	reviewCount := a.countReviewable(a.diffs)
-	fmt.Fprintf(stdout.Writer(), "[ocr] %d file(s) changed, reviewing %d in %s\n", totalChanged, reviewCount, a.args.RepoDir)
-
 	a.diffs = a.filterDiffs(a.diffs)
+	reviewCount := len(a.diffs)
+	fmt.Fprintf(stdout.Writer(), "[ocr] %d file(s) changed, reviewing %d in %s\n", totalChanged, reviewCount, a.args.RepoDir)
 
 	if len(a.diffs) == 0 {
 		fmt.Fprintln(stdout.Writer(), "[ocr] No supported files changed. Skipping review.")
@@ -596,12 +596,12 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 	// Build a replacement map; keys must be replaced in a single pass
 	// so that substituted values containing other tokens are never expanded again.
 	replacements := map[string]string{
-		"{{current_system_date_time}}":   a.currentDate,
-		"{{system_rule}}":                rule,
-		"{{change_files}}":               changeFilesExcludingCurrent,
-		"{{diff}}":                       d.Diff,
-		"{{requirement_background}}":     a.args.Background,
-		"{{plan_guidance}}":              planResult,
+		"{{current_system_date_time}}": a.currentDate,
+		"{{system_rule}}":              rule,
+		"{{change_files}}":             changeFilesExcludingCurrent,
+		"{{diff}}":                     d.Diff,
+		"{{requirement_background}}":   a.args.Background,
+		"{{plan_guidance}}":            planResult,
 	}
 
 	for _, m := range rawMsgs {
@@ -743,7 +743,66 @@ func (a *Agent) filterDiffs(diffs []model.Diff) []model.Diff {
 	if skipped > 0 {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Filtered %d file(s) by include/exclude rules\n", skipped)
 	}
-	return kept
+	return a.filterByTemplateHints(kept)
+}
+
+func (a *Agent) filterByTemplateHints(diffs []model.Diff) []model.Diff {
+	f := a.args.FileFilter
+	if f == nil || (!f.HasFileHints() && f.MaxFiles <= 0) {
+		return diffs
+	}
+
+	type scoredDiff struct {
+		diff  model.Diff
+		score int
+		index int
+	}
+
+	scored := make([]scoredDiff, 0, len(diffs))
+	matched := 0
+	for i, d := range diffs {
+		score := f.FileHintScore(effectivePath(d))
+		if score > 0 {
+			matched++
+		}
+		scored = append(scored, scoredDiff{diff: d, score: score, index: i})
+	}
+
+	if f.HasFileHints() && matched == 0 {
+		fmt.Fprintln(stdout.Writer(), "[ocr] Template file hints matched no files; using existing filtered files")
+		return limitTemplateFiles(diffs, f.MaxFiles)
+	}
+
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		return scored[i].index < scored[j].index
+	})
+
+	var narrowed []model.Diff
+	for _, item := range scored {
+		if f.HasFileHints() && item.score == 0 {
+			continue
+		}
+		narrowed = append(narrowed, item.diff)
+	}
+	if len(narrowed) == 0 {
+		narrowed = diffs
+	}
+	narrowed = limitTemplateFiles(narrowed, f.MaxFiles)
+
+	if len(narrowed) < len(diffs) {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Template file hints selected %d of %d file(s)\n", len(narrowed), len(diffs))
+	}
+	return narrowed
+}
+
+func limitTemplateFiles(diffs []model.Diff, maxFiles int) []model.Diff {
+	if maxFiles <= 0 || len(diffs) <= maxFiles {
+		return diffs
+	}
+	return diffs[:maxFiles]
 }
 
 // extFromPath returns the file extension with leading dot, lowercased.
