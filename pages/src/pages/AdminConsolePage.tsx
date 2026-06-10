@@ -595,14 +595,14 @@ const AdminConsolePage: React.FC = () => {
     setActiveMenu(key);
     if (key === 'sessions') {
       setSelectedSession('');
-      navigate(menuPathMap[key], { replace: true });
+      navigate(menuPathMap[key]);
     } else if (key === 'sessionDetail') {
       const params = new URLSearchParams();
       if (selectedRepo) params.set('repo', selectedRepo);
       if (selectedSession) params.set('session', selectedSession);
-      navigate(`${menuPathMap[key]}?${params.toString()}`, { replace: true });
+      navigate(`${menuPathMap[key]}?${params.toString()}`);
     } else {
-      navigate(menuPathMap[key], { replace: true });
+      navigate(menuPathMap[key]);
     }
   };
 
@@ -975,7 +975,7 @@ const AdminConsolePage: React.FC = () => {
       setReports((prev) => [data, ...prev.filter((item) => item.id !== data.id)]);
       setExpandedReport(data.id);
       setActiveMenu('reports');
-      navigate(menuPathMap.reports, { replace: true });
+      navigate(menuPathMap.reports);
     } catch {
       setReportMessage(t('admin.reports.generateFailed'));
     } finally {
@@ -1005,7 +1005,7 @@ const AdminConsolePage: React.FC = () => {
       setReportMessage(t('admin.issues.generateSuccess'));
       setIssueLists((prev) => [data, ...prev.filter((item) => item.id !== data.id)]);
       setSelectedIssueListId(data.id);
-      navigate(menuPathMap.issueLists, { replace: true });
+      navigate(menuPathMap.issueLists);
     } catch {
       setReportMessage(t('admin.issues.generateFailed'));
     } finally {
@@ -1962,7 +1962,7 @@ const AdminConsolePage: React.FC = () => {
                   const params = new URLSearchParams();
                   params.set('repo', selectedList.encodedRepo);
                   params.set('session', selectedList.sessionID);
-                  navigate(`/admin/task-detail?${params.toString()}`, { replace: true });
+                  navigate(`/admin/task-detail?${params.toString()}`);
                 }}
                 className="ml-auto rounded-lg bg-blue-50 border border-blue-200 px-3 py-1.5 text-sm text-blue-700 hover:border-blue-300"
               >
@@ -2265,7 +2265,7 @@ const AdminConsolePage: React.FC = () => {
                           onClick={() => {
                             setSelectedRepo(sessionRepo);
                             setSelectedSession(session.sessionID);
-                            navigate(`${menuPathMap.sessionDetail}?repo=${encodeURIComponent(sessionRepo)}&session=${encodeURIComponent(session.sessionID)}`, { replace: true });
+                            navigate(`${menuPathMap.sessionDetail}?repo=${encodeURIComponent(sessionRepo)}&session=${encodeURIComponent(session.sessionID)}`);
                             setActiveMenu('sessionDetail');
                           }}
                           className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-brand-500/40 hover:text-brand-600"
