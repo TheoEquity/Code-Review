@@ -154,13 +154,14 @@ func tryOCRConfigEndpoints(path string) ([]ResolvedEndpoint, bool, error) {
 	}
 
 	var endpoints []ResolvedEndpoint
-	if ep, ok := endpointFromFileConfig(cfg.Llm, "OCR config file"); ok {
-		endpoints = append(endpoints, ep)
-	}
-	for _, provider := range cfg.Llm.Providers {
-		if ep, ok := endpointFromFileConfig(provider, "OCR config file"); ok {
-			endpoints = append(endpoints, ep)
+	if len(cfg.Llm.Providers) > 0 {
+		for _, provider := range cfg.Llm.Providers {
+			if ep, ok := endpointFromFileConfig(provider, "OCR config file"); ok {
+				endpoints = append(endpoints, ep)
+			}
 		}
+	} else if ep, ok := endpointFromFileConfig(cfg.Llm, "OCR config file"); ok {
+		endpoints = append(endpoints, ep)
 	}
 	if len(endpoints) == 0 {
 		return nil, false, nil

@@ -154,3 +154,41 @@ func TestResolveEndpoints_ConfigFileProviders(t *testing.T) {
 		t.Fatalf("unexpected second endpoint: %#v", endpoints[1])
 	}
 }
+
+func TestResolveEndpoints_ProvidersOverrideTopLevel(t *testing.T) {
+	t.Setenv("OCR_LLM_URL", "")
+	t.Setenv("OCR_LLM_TOKEN", "")
+	t.Setenv("OCR_LLM_MODEL", "")
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_MODEL", "")
+
+	useOpenAI := false
+	cfg := configFile{
+		Llm: llmFileConfig{
+			Name:      "top-level",
+			URL:       "https://top.example.com",
+			AuthToken: "top-token",
+			Model:     "top-model",
+			Providers: []llmFileConfig{
+				{Name: "provider", URL: "https://provider.example.com/v1", AuthToken: "provider-token", Model: "provider-model", UseAnthropic: &useOpenAI},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	endpoints, err := ResolveEndpoints(cfgPath)
+	if err != nil {
+		t.Fatalf("ResolveEndpoints: %v", err)
+	}
+	if len(endpoints) != 1 {
+		t.Fatalf("expected providers to override top-level endpoint, got %d endpoints", len(endpoints))
+	}
+	if endpoints[0].Name != "provider" || endpoints[0].Model != "provider-model" {
+		t.Fatalf("unexpected endpoint: %#v", endpoints[0])
+	}
+}
