@@ -55,3 +55,60 @@ func TestBuildLightFileIndexReusesCache(t *testing.T) {
 		t.Fatalf("expected cached summary to match, first=%q second=%q", first[path].Summary, second[path].Summary)
 	}
 }
+
+func TestBuildLightFileIndexBuildsSummariesWithoutHints(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	path := "internal/server/router.go"
+	fullPath := filepath.Join(repoDir, path)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fullPath, []byte("package server\n\nfunc NewRouter() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := &Agent{args: Args{RepoDir: repoDir}}
+	index := agent.buildLightFileIndex([]model.Diff{{NewPath: path}}, nil)
+	if !strings.Contains(index[path].Summary, "func NewRouter") {
+		t.Fatalf("expected summary without hints, got %#v", index[path])
+	}
+}
+
+func TestBuildRelatedChangeContextUsesSummariesAndLimitsFiles(t *testing.T) {
+	current := model.Diff{NewPath: "internal/auth/service.go", Diff: "+func ValidateToken(token string) error { return nil }"}
+	diffs := []model.Diff{current}
+	index := lightFileIndex{}
+	for _, path := range []string{
+		"internal/auth/token.go",
+		"internal/auth/session.go",
+		"internal/auth/user.go",
+		"internal/auth/claims.go",
+		"internal/auth/password.go",
+		"internal/auth/login.go",
+		"internal/auth/middleware.go",
+		"internal/auth/store.go",
+		"internal/metrics/counter.go",
+	} {
+		diffs = append(diffs, model.Diff{NewPath: path})
+		index[path] = lightFileEntry{Path: path, Summary: "func ValidateToken() {}"}
+	}
+
+	agent := &Agent{diffs: diffs, lightIndex: index}
+	context := agent.buildRelatedChangeContext(current.NewPath, current.Diff)
+
+	if strings.Count(context, "summary:") != maxRagRelatedFiles {
+		t.Fatalf("expected %d related summaries, got context:\n%s", maxRagRelatedFiles, context)
+	}
+	if !strings.Contains(context, "internal/auth/token.go") || strings.Contains(context, current.NewPath) {
+		t.Fatalf("unexpected related context:\n%s", context)
+	}
+}
+
+func TestCompactSummary(t *testing.T) {
+	longSummary := strings.Repeat("x", 300)
+	got := compactSummary(longSummary)
+	if len(got) != 243 || !strings.HasSuffix(got, "...") {
+		t.Fatalf("expected compacted summary with ellipsis, got length=%d value=%q", len(got), got)
+	}
+}

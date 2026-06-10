@@ -23,9 +23,6 @@ type lightFileEntry struct {
 
 func (a *Agent) buildLightFileIndex(diffs []model.Diff, hints []string) lightFileIndex {
 	idx := make(lightFileIndex, len(diffs))
-	if len(hints) == 0 {
-		return idx
-	}
 
 	cache := loadLightFileIndexCache(a.args.RepoDir, hints)
 	changed := false
