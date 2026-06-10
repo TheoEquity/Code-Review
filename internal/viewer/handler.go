@@ -87,6 +87,7 @@ type ruleLayerSummary struct {
 	Title       string                        `json:"title"`
 	Path        string                        `json:"path"`
 	Description string                        `json:"description,omitempty"`
+	Summary     string                        `json:"summary,omitempty"`
 	Available   bool                          `json:"available"`
 	DefaultRule string                        `json:"defaultRule,omitempty"`
 	Rules       []ruleconfig.ProjectRuleEntry `json:"rules,omitempty"`
@@ -1311,10 +1312,11 @@ func handleRulesAPI(w http.ResponseWriter, _ *http.Request, root string) {
 		{
 			Priority:    1,
 			Source:      "custom",
-			Title:       "--rule flag",
+			Title:       "Task rule file (--rule)",
 			Path:        "Specified when creating a review task",
-			Description: "Highest priority. Applies only to review tasks that pass a custom rule file path.",
-			Available:   false,
+			Description: "Highest priority. Web audit templates map to this layer by passing rules/security.json, rules/quality.json, rules/performance.json, or rules/architecture.json as --rule.",
+			Summary:     "Active when a review task selects a specialized audit template or a custom rule path.",
+			Available:   true,
 		},
 		{
 			Priority:    2,
@@ -1337,7 +1339,8 @@ func handleRulesAPI(w http.ResponseWriter, _ *http.Request, root string) {
 			Source:      "system",
 			Title:       "System defaults",
 			Path:        "embedded:system_rules.json",
-			Description: "Built-in fallback rules used when higher-priority layers do not match.",
+			Description: "Built-in fallback rules used when P1/P2/P3 do not match. This layer stays short and high-confidence to avoid overloading the LLM.",
+			Summary:     "Covers correctness, security, performance, reliability, and critical test gaps; excludes style-only, spelling-only, preference-only, and broad best-practice findings.",
 			Available:   true,
 			DefaultRule: systemRule.DefaultRule,
 			PathRules:   make([]systemRuleEntry, 0, len(systemRule.PathRules)),
@@ -1408,11 +1411,12 @@ func handleRulesAPI(w http.ResponseWriter, _ *http.Request, root string) {
 func rulesOptimizationSummaries() []ruleOptimizationSummary {
 	return []ruleOptimizationSummary{
 		{
-			Title:       "Template file narrowing",
+			Title:       "P1 template rule narrowing",
 			Stage:       "Before review dispatch",
-			Description: "Specialized audit templates use fileHints and maxFiles to reduce the candidate file set before LLM review starts.",
+			Description: "Specialized audit templates are passed through P1 as --rule files, then use fileHints and maxFiles to reduce the candidate file set before LLM review starts.",
 			Source:      "rules/security.json, rules/quality.json, rules/performance.json, rules/architecture.json",
 			Details: []string{
+				"P1 priority is reused; no parallel rule chain is added.",
 				"Path hints and lightweight content hints are both used for scoring.",
 				"When no hint matches, the system falls back to existing filtered files.",
 			},
@@ -1466,9 +1470,9 @@ func promptLayerSummaries() []promptLayerSummary {
 		},
 		{
 			Name:        "Audit template rules",
-			Location:    "rules/*.json",
-			Description: "Specialized rule files provide defaultRule, fileHints, and maxFiles for focused audit modes.",
-			Examples:    []string{"fileHints", "maxFiles", "defaultRule"},
+			Location:    "P1 --rule -> rules/*.json",
+			Description: "Specialized rule files reuse the existing highest-priority rule layer and provide defaultRule, fileHints, and maxFiles for focused audit modes.",
+			Examples:    []string{"rules/security.json", "fileHints", "maxFiles"},
 		},
 		{
 			Name:        "Tool guidance",

@@ -57,23 +57,23 @@ func TestResolve_DefaultRules(t *testing.T) {
 		path       string
 		wantSubstr string // substring that should appear in the matched rule
 	}{
-		{"src/main/java/com/example/foo.java", "Logic Error Detection"},
-		{"foo.java", "Logic Error Detection"},
-		{"src/main/resources/mapper/usermapper.xml", "SQL Logic Error Detection"},
-		{"src/main/resources/dao/userdao.xml", "SQL Logic Error Detection"},
+		{"src/main/java/com/example/foo.java", "Java High-Confidence Checks"},
+		{"foo.java", "Java High-Confidence Checks"},
+		{"src/main/resources/mapper/usermapper.xml", "Mapper/DAO XML High-Confidence Checks"},
+		{"src/main/resources/dao/userdao.xml", "Mapper/DAO XML High-Confidence Checks"},
 		{"pom.xml", "snapshot"},
 		{"submodule/pom.xml", "snapshot"},
-		{"src/main/resources/application.properties", "Configuration Error Detection"},
+		{"src/main/resources/application.properties", "Properties High-Confidence Checks"},
 		{"frontend/package.json", "latest"},
 		{"config/app.yaml", "yaml-key"},
 		{"deploy/values.yml", "yaml-key"},
 		{"src/components/app.tsx", "React"},
 		{"lib/utils.ts", "TypeScript"},
-		{"app.kt", "Null Safety"},
-		{"src/main/handler.cpp", "Smart Pointer"},
-		{"driver.c", "malloc"},
-		{"pages/Index.ets", "State Decorator"},
-		{"components/Button.ets", "State Decorator"},
+		{"app.kt", "Kotlin High-Confidence Checks"},
+		{"src/main/handler.cpp", "C++ High-Confidence Checks"},
+		{"driver.c", "C High-Confidence Checks"},
+		{"pages/Index.ets", "ArkTS High-Confidence Checks"},
+		{"components/Button.ets", "ArkTS High-Confidence Checks"},
 		{"entry/src/main/module.json5", "json-key"},
 		{"entry/oh-package.json5", "json-key"},
 	}
@@ -187,7 +187,7 @@ func TestNewResolver_DefaultOnly(t *testing.T) {
 		t.Fatalf("NewResolver: %v", err)
 	}
 	got := resolver.Resolve("src/main.java")
-	if !strings.Contains(got, "Logic Error Detection") {
+	if !strings.Contains(got, "Java High-Confidence Checks") {
 		t.Errorf("expected system default java rule, got %q", truncate(got, 80))
 	}
 }
@@ -226,7 +226,7 @@ func TestNewResolver_ProjectRuleHighestPriority(t *testing.T) {
 		want string
 	}{
 		{"force-api/src/foo.java", "project-java-rule"},
-		{"other/src/bar.java", "Logic Error Detection"},
+		{"other/src/bar.java", "Java High-Confidence Checks"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -591,7 +591,7 @@ func TestResolveDetail_SystemPatternMatch(t *testing.T) {
 	if detail.Pattern != "**/*.java" {
 		t.Errorf("expected pattern '**/*.java', got %q", detail.Pattern)
 	}
-	if !strings.Contains(detail.Rule, "Logic Error Detection") {
+	if !strings.Contains(detail.Rule, "Java High-Confidence Checks") {
 		t.Errorf("expected java rule, got %q", truncate(detail.Rule, 80))
 	}
 }

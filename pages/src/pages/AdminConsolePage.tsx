@@ -112,6 +112,7 @@ interface RuleLayer {
   title: string;
   path: string;
   description?: string;
+  summary?: string;
   available: boolean;
   defaultRule?: string;
   include?: string[];
@@ -2315,6 +2316,7 @@ const AdminConsolePage: React.FC = () => {
 
     if (activeMenu === 'rules') {
       const ruleEntryCount = (layer: RuleLayer) => (layer.rules?.length || 0) + (layer.pathRules?.length || 0) + (layer.defaultRule ? 1 : 0);
+      const isFallbackLayer = (layer: RuleLayer) => layer.priority === 4 && layer.source === 'system';
 
       return (
         <div className="grid gap-4">
@@ -2397,6 +2399,7 @@ const AdminConsolePage: React.FC = () => {
                         </span>
                       </div>
                       {layer.description && <div className="mt-2 text-sm text-slate-600">{layer.description}</div>}
+                      {layer.summary && <div className="mt-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-600">{layer.summary}</div>}
                       <div className="mt-2 text-xs break-all text-slate-500">{layer.path}</div>
                     </div>
                     <div className="text-xs text-slate-500">
@@ -2420,18 +2423,18 @@ const AdminConsolePage: React.FC = () => {
                   </div>
 
                   {layer.defaultRule && (
-                    <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
-                      <div className="mb-2 text-xs uppercase tracking-[0.2em] text-brand-300">{t('admin.rules.defaultRule')}</div>
-                      <pre className="whitespace-pre-wrap text-xs leading-6 text-slate-700">{layer.defaultRule}</pre>
-                    </div>
+                    <details className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700" open={!isFallbackLayer(layer)}>
+                      <summary className="cursor-pointer text-xs uppercase tracking-[0.2em] text-brand-300">{isFallbackLayer(layer) ? 'P4 fallback details' : t('admin.rules.defaultRule')}</summary>
+                      <pre className="mt-3 whitespace-pre-wrap text-xs leading-6 text-slate-700">{layer.defaultRule}</pre>
+                    </details>
                   )}
 
                   <div className="mt-4 space-y-3">
                     {layer.pathRules?.map((rule) => (
-                      <div key={rule.pattern} className="rounded-xl border border-slate-200 bg-white p-4">
-                        <div className="text-xs font-semibold text-brand-300">{rule.pattern}</div>
+                      <details key={rule.pattern} className="rounded-xl border border-slate-200 bg-white p-4" open={!isFallbackLayer(layer)}>
+                        <summary className="cursor-pointer text-xs font-semibold text-brand-300">{rule.pattern}</summary>
                         <pre className="mt-2 whitespace-pre-wrap text-xs leading-6 text-slate-700">{rule.rule}</pre>
-                      </div>
+                      </details>
                     ))}
                     {layer.rules?.map((rule) => (
                       <div key={rule.path} className="rounded-xl border border-slate-200 bg-white p-4">
