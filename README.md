@@ -109,7 +109,7 @@ Open browser at `http://localhost:3030`. Frontend proxies `/api/*` to backend.
 
 ---
 
-### 配置模型
+### Configure LLM
 
 ```bash
 ocr config set llm.url https://your-llm-endpoint
@@ -118,7 +118,7 @@ ocr config set llm.model your-model-name
 ocr config set llm.use_anthropic true
 ```
 
-也可以使用环境变量：
+Or use environment variables:
 
 ```bash
 export OCR_LLM_URL=https://your-llm-endpoint
@@ -127,71 +127,11 @@ export OCR_LLM_MODEL=your-model-name
 export OCR_USE_ANTHROPIC=true
 ```
 
-测试模型连通性：
+Test LLM connectivity:
 
 ```bash
 ocr llm test
 ```
-
-### 启动 Web 管理台
-
-#### 生产模式
-
-```bash
-ocr serve --addr :3030
-```
-
-#### 开发模式
-
-当前端用 webpack dev server 运行时，前端端口 3030 会自动代理 API 请求到后端 5483。
-
-如果通过域名或反向代理访问，需要配置允许的 Host：
-
-```bash
-OCR_VIEWER_ALLOWED_HOSTS=your-domain.example.com ocr serve --addr :3030
-```
-
-### CLI 使用方式
-
-在目标项目目录下执行：
-
-```bash
-# 审查当前 Git 工作区变更
-ocr review
-
-# 全量审计当前仓库
-ocr review --full
-
-# 审查两个分支或引用之间的差异
-ocr review --from main --to feature-branch
-
-# 审查指定提交
-ocr review --commit abc123
-```
-
-### Web 管理台使用流程
-
-1. 启动 `ocr serve`。
-2. 打开 Web 管理台。
-3. 在“仓库管理”中添加仓库名称和本地地址，可选填写远程地址。
-4. 在“新建任务”中选择仓库和任务模式，默认推荐使用“全量审计”。
-5. 在“任务清单”查看运行中和已完成任务。
-6. 在“任务详情”中展开问题清单、生成综合诊断、查看已审查文件和每个文件的工具调用细节。
-7. 在“审计报告”中按仓库和会话时间查询结构化综合诊断报告。
-8. 在“规则管理”中查看当前生效规则层级和系统内置规则。
-
-### 规则层级
-
-规则按以下优先级解析，每个文件最终命中 1 条规则后交给 LLM 判断：
-
-| Priority | Source | Path | Status |
-|----------|--------|------|--------|
-| 1 | Custom rule | `--rule <path>` | Only enabled when passed in a review task |
-| 2 | Project rule | `<repoDir>/.opencodereview/rule.json` | Enabled when the repository contains this file |
-| 3 | Global rule | `~/.opencodereview/rule.json` | Enabled when this file exists |
-| 4 | System default | Embedded `system_rules.json` | Always enabled as fallback |
-
-当前默认状态下，自开发系统主要使用第 4 层系统内置规则。
 
 ---
 
