@@ -105,6 +105,18 @@ func TestBuildRelatedChangeContextUsesSummariesAndLimitsFiles(t *testing.T) {
 	}
 }
 
+func TestPlanTemplateReplacementsIncludesRagContext(t *testing.T) {
+	replacements := planTemplateReplacements("today", "rule", "related summaries", "+diff", "background", "tools")
+	content := templateReplaceOnce("{{change_files}}\n{{rag_context}}\n{{diff}}", replacements)
+
+	if strings.Contains(content, "{{rag_context}}") || strings.Contains(content, "{{change_files}}") {
+		t.Fatalf("expected plan placeholders to be replaced, got %q", content)
+	}
+	if strings.Count(content, "related summaries") != 2 {
+		t.Fatalf("expected related context in both plan placeholders, got %q", content)
+	}
+}
+
 func TestCompactSummary(t *testing.T) {
 	longSummary := strings.Repeat("x", 300)
 	got := compactSummary(longSummary)

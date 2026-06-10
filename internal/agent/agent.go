@@ -84,6 +84,18 @@ func templateReplaceOnce(content string, replacements map[string]string) string 
 	return sb.String()
 }
 
+func planTemplateReplacements(currentDate, rule, relatedContext, rawDiff, background, planTools string) map[string]string {
+	return map[string]string{
+		"{{current_system_date_time}}": currentDate,
+		"{{system_rule}}":              rule,
+		"{{change_files}}":             relatedContext,
+		"{{rag_context}}":              relatedContext,
+		"{{diff}}":                     rawDiff,
+		"{{requirement_background}}":   background,
+		"{{plan_tools}}":               planTools,
+	}
+}
+
 // Args holds all dependencies and configuration needed to run a review session.
 type Args struct {
 	// RepoDir is the root of the git repository.
@@ -966,14 +978,14 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 	pt := a.args.Template.PlanTask
 	messages := make([]llm.Message, 0, len(pt.Messages))
 
-	planReplacements := map[string]string{
-		"{{current_system_date_time}}": a.currentDate,
-		"{{system_rule}}":              rule,
-		"{{change_files}}":             changeFiles,
-		"{{diff}}":                     rawDiff,
-		"{{requirement_background}}":   a.args.Background,
-		"{{plan_tools}}":               formatToolDefs(a.args.PlanToolDefs),
-	}
+	planReplacements := planTemplateReplacements(
+		a.currentDate,
+		rule,
+		changeFiles,
+		rawDiff,
+		a.args.Background,
+		formatToolDefs(a.args.PlanToolDefs),
+	)
 
 	for _, m := range pt.Messages {
 		content := m.Content
