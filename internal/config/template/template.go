@@ -30,7 +30,116 @@ func LoadDefault() (*Template, error) {
 	if err := json.Unmarshal(defaultTemplate, &tpl); err != nil {
 		return nil, fmt.Errorf("unmarshal default template: %w", err)
 	}
+	tpl.slimDefaultPrompts()
 	return &tpl, nil
+}
+
+func (t *Template) slimDefaultPrompts() {
+	setFirstSystem(&t.MainTask, `You are a concise code review assistant.
+
+Rules:
+- Review only newly added or modified code in the provided diff.
+- Report real correctness, security, performance, reliability, or maintainability issues.
+- Use tools when required context is missing.
+- Avoid comments on deleted, unchanged, generated, formatting-only, or correct code.
+- Output actionable review findings only.`)
+
+	setFirstUser(&t.MainTask, `// Related changed files selected by lightweight RAG.
+<related_change_context>
+{{rag_context}}
+</related_change_context>
+
+<current_file_path>{{current_file_path}}</current_file_path>
+
+<current_file_diff>
+{{diff}}
+</current_file_diff>
+
+Current time in the real world: {{current_system_date_time}}
+
+<user_task>
+### Requirement Background (Optional)
+{{requirement_background}}
+
+### Review Checklist
+{{system_rule}}
+
+### Review Plan (Optional)
+{{plan_guidance}}
+
+Review the code changes in <current_file_diff>.
+</user_task>`)
+
+	if t.PlanTask != nil {
+		setFirstSystem(t.PlanTask, `You are a concise code review planning assistant.
+
+Return only the required JSON review plan.`)
+		setFirstUser(t.PlanTask, `// Related changed files selected by lightweight RAG.
+<related_change_context>
+{{rag_context}}
+</related_change_context>
+
+<current_file_path>{{current_file_path}}</current_file_path>
+
+<current_file_diff>
+{{diff}}
+</current_file_diff>
+
+Current time in the real world: {{current_system_date_time}}
+
+### Requirement Background (Optional)
+{{requirement_background}}
+
+### Review Checklist
+{{system_rule}}
+
+### Available Tools
+{{plan_tools}}
+
+### JSON Schema
+{
+  "change_summary": "A brief description of the purpose and scope of this code change",
+  "issues": [
+    {
+      "severity": "high|medium|low",
+      "description": "Problem location, nature, and impact",
+      "tool_guidance": [
+        {
+          "name": "Tool name",
+          "reason": "Why this tool is relevant",
+          "arguments": "Invocation arguments"
+        }
+      ]
+    }
+  ]
+}
+
+### Rules
+Only analyze newly added and modified code. Sort issues by severity. Start with `+"```json"+`.`)
+	}
+
+	setFirstSystem(&t.MemoryCompressionTask, `Compress the review conversation into concise state for continuation. Include confirmed issues, useful tool conclusions, completed work, pending work, and current focus when present.`)
+	if t.ReLocationTask != nil {
+		setFirstSystem(t.ReLocationTask, `Extract the exact code snippet from the diff that the review comment targets. Output only one fenced code block. /no_think`)
+	}
+}
+
+func setFirstSystem(conv *LlmConversation, content string) {
+	for i := range conv.Messages {
+		if conv.Messages[i].Role == "system" {
+			conv.Messages[i].Content = content
+			return
+		}
+	}
+}
+
+func setFirstUser(conv *LlmConversation, content string) {
+	for i := range conv.Messages {
+		if conv.Messages[i].Role == "user" {
+			conv.Messages[i].Content = content
+			return
+		}
+	}
 }
 
 // applyLanguage appends instruction to all system-role messages in conv.
