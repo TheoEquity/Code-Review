@@ -100,9 +100,18 @@ curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/dow
 **从源码构建**
 
 ```bash
-git clone https://github.com/alibaba/open-code-review.git
-cd open-code-review
-make build
+git clone https://github.com/TheoEquity/Code-Review.git
+cd Code-Review
+git checkout main
+
+# 构建前端资源
+cd pages
+npm install
+npm run build
+
+# 构建 CLI 二进制
+cd ..
+go build -o ./dist/opencodereview ./cmd/opencodereview
 sudo cp dist/opencodereview /usr/local/bin/ocr
 ```
 

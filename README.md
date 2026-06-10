@@ -220,9 +220,18 @@ curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/dow
 **From Source**
 
 ```bash
-git clone https://github.com/alibaba/open-code-review.git
-cd open-code-review
-make build
+git clone https://github.com/TheoEquity/Code-Review.git
+cd Code-Review
+git checkout main
+
+# Build frontend assets
+cd pages
+npm install
+npm run build
+
+# Build CLI binary
+cd ..
+go build -o ./dist/opencodereview ./cmd/opencodereview
 sudo cp dist/opencodereview /usr/local/bin/ocr
 ```
 
