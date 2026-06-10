@@ -32,19 +32,17 @@
 
 ### 从本仓库安装
 
+#### 方式一：生产模式（推荐，适用于部署到其他服务器）
+
+生产模式将前端静态资源嵌入到二进制文件中，单个二进制文件即可启动 Web 控制台。
+
 ```bash
 git clone https://github.com/TheoEquity/Code-Review.git
 cd Code-Review
 git checkout main
 
-# Build frontend assets
-cd pages
-npm install
-npm run build
-
-# Build CLI / viewer binary
-cd ..
-go build -o ./dist/opencodereview ./cmd/opencodereview
+# 一键构建（自动编译前端 + 后端）
+./build.sh
 ```
 
 安装到系统命令路径：
@@ -53,7 +51,38 @@ go build -o ./dist/opencodereview ./cmd/opencodereview
 cp ./dist/opencodereview /usr/local/bin/ocr
 ```
 
-如当前用户没有 `/usr/local/bin` 写入权限，可以把二进制复制到自己的工具目录，并把该目录加入 `PATH`。
+启动生产模式 Web 控制台：
+
+```bash
+ocr serve --addr :3030
+```
+
+打开浏览器访问 `http://<服务器IP>:3030`。
+
+#### 方式二：开发模式（适用于当前开发服务器）
+
+开发模式下前端使用 webpack dev server，支持热更新。
+
+```bash
+git clone https://github.com/TheoEquity/Code-Review.git
+cd Code-Review
+git checkout main
+
+# 构建前端
+cd pages
+npm install
+npm run build
+
+# 启动前端（端口 3030）
+npm run dev
+
+# 新开终端，启动后端（端口 5483）
+cd ..
+go build -o /tmp/opencodereview ./cmd/opencodereview
+/tmp/opencodereview viewer --addr :5483
+```
+
+> **注意**：生产环境请使用方式一。
 
 ### 配置模型
 
@@ -81,11 +110,17 @@ ocr llm test
 
 ### 启动 Web 管理台
 
+#### 生产模式
+
 ```bash
-ocr viewer --addr 127.0.0.1:5483
+ocr serve --addr :3030
 ```
 
-如果通过域名或反向代理访问 viewer，需要配置允许的 Host：
+#### 开发模式
+
+当前端用 webpack dev server 运行时，前端端口 3030 会自动代理 API 请求到后端 5483。
+
+如果通过域名或反向代理访问，需要配置允许的 Host：
 
 ```bash
 OCR_VIEWER_ALLOWED_HOSTS=your-domain.example.com ocr viewer --addr 127.0.0.1:5483
@@ -111,7 +146,7 @@ ocr review --commit abc123
 
 ### Web 管理台使用流程
 
-1. 启动 `ocr viewer`。
+1. 启动 `ocr serve`。
 2. 打开 Web 管理台。
 3. 在“仓库管理”中添加仓库名称和本地地址，可选填写远程地址。
 4. 在“新建任务”中选择仓库和任务模式，默认推荐使用“全量审计”。
@@ -181,6 +216,60 @@ The agent's strengths are concentrated where they matter most — dynamic decisi
 
 #### Install
 
+**Production Mode (Recommended for deployment)**
+
+Production mode embeds frontend static assets into the binary — a single binary file can start the web console.
+
+```bash
+git clone https://github.com/TheoEquity/Code-Review.git
+cd Code-Review
+git checkout main
+
+# One-line build (automatically compiles frontend + backend)
+./build.sh
+```
+
+Install to system path:
+
+```bash
+cp ./dist/opencodereview /usr/local/bin/ocr
+```
+
+Start production mode web console:
+
+```bash
+ocr serve --addr :3030
+```
+
+Open browser at `http://<server-IP>:3030`.
+
+**Development Mode (for local development)**
+
+In development mode, frontend uses webpack dev server with hot reload.
+
+```bash
+git clone https://github.com/TheoEquity/Code-Review.git
+cd Code-Review
+git checkout main
+
+# Build frontend
+cd pages
+npm install
+npm run build
+
+# Start frontend (port 3030)
+npm run dev
+
+# Open new terminal, start backend (port 5483)
+cd ..
+go build -o /tmp/opencodereview ./cmd/opencodereview
+/tmp/opencodereview viewer --addr :5483
+```
+
+> **Note**: Use production mode for production environments.
+
+**Via NPM (Recommended)**
+
 **Via NPM (Recommended)**
 
 ```bash
@@ -219,21 +308,9 @@ curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/dow
 
 **From Source**
 
-```bash
-git clone https://github.com/TheoEquity/Code-Review.git
-cd Code-Review
-git checkout main
+See **Production Mode** or **Development Mode** sections above.
 
-# Build frontend assets
-cd pages
-npm install
-npm run build
-
-# Build CLI binary
-cd ..
-go build -o ./dist/opencodereview ./cmd/opencodereview
-sudo cp dist/opencodereview /usr/local/bin/ocr
-```
+> **Note**: The NPM package and GitHub Release binaries are from the upstream Alibaba repository and do not include our custom features. Always install from source using the instructions above.
 
 #### Quick Start
 
@@ -362,7 +439,7 @@ See the [`examples/`](./examples/) directory for integration examples:
 | `ocr rules check <file>` | — | Preview which review rule applies to a file path |
 | `ocr config set <key> <value>` | — | Set configuration values |
 | `ocr llm test` | — | Test LLM connectivity |
-| `ocr viewer` | `ocr v` | Launch WebUI session viewer on `localhost:5483` |
+| `ocr serve` | — | Launch production Web console on `localhost:3030` |
 | `ocr version` | — | Show version info |
 
 ### `ocr review` Flags
@@ -406,20 +483,20 @@ ocr review --rule /path/to/my-rules.json
 ocr rules check src/main/java/com/example/Foo.java
 ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml
 
-# View review session history in browser
-ocr viewer
-ocr viewer --addr :3000
+# Start production web console
+ocr serve
+ocr serve --addr :3030
 ```
 
-### Viewer security
+### Web Console Security
 
-The viewer serves session JSONL contents (LLM request messages and responses) over HTTP. It enforces a Host-header allowlist on every request: loopback names (`localhost`, `127.0.0.0/8`, `::1`) and the concrete bind host are always allowed. Wildcard binds (`--addr :3000`, `--addr 0.0.0.0:3000`) and other non-loopback Hostnames must be added via the `OCR_VIEWER_ALLOWED_HOSTS` environment variable (comma-separated):
+The web console serves session JSONL contents (LLLM request messages and responses) over HTTP. It enforces a Host-header allowlist on every request: loopback names (`localhost`, `127.0.0.0/8`, `::1`) and the concrete bind host are always allowed. Wildcard binds (`--addr :3030`, `--addr 0.0.0.0:3030`) and other non-loopback Hostnames must be added via the `OCR_VIEWER_ALLOWED_HOSTS` environment variable (comma-separated):
 
 ```bash
-OCR_VIEWER_ALLOWED_HOSTS=review.internal,ocr.lan ocr viewer --addr :3000
+OCR_VIEWER_ALLOWED_HOSTS=review.internal,ocr.lan ocr serve --addr :3030
 ```
 
-This blocks DNS-rebinding attacks against the local viewer.
+This blocks DNS-rebinding attacks against the local web console.
 
 ## Review Rules
 
