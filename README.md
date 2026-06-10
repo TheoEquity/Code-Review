@@ -65,28 +65,25 @@ ocr serve --addr :3030
 
 #### 方式二：开发模式（适用于当前开发服务器）
 
-开发模式下前端使用 webpack dev server，支持热更新。
+开发模式下前端使用 webpack dev server，支持热更新。后端用 `serve` 命令启动（不同端口）。
 
 ```bash
 git clone https://github.com/TheoEquity/Code-Review.git
 cd Code-Review
 git checkout main
 
-# 构建前端
+# 步骤 1: 启动后端（端口 5483）
+./build.sh
+./dist/opencodereview serve --addr :5483 &
+
+# 步骤 2: 新开终端，启动前端（端口 3030）
 cd pages
-npm install
-npm run build
-
-# 启动前端（端口 3030）
 npm run dev
-
-# 新开终端，启动后端（端口 5483）
-cd ..
-go build -o /tmp/opencodereview ./cmd/opencodereview
-/tmp/opencodereview viewer --addr :5483
 ```
 
-> **注意**：生产环境请使用方式一。
+前端会自动 proxy `/api/*` 请求到后端 5483。
+
+> **注意**：生产环境请使用方式一（单端口生产模式）。
 
 ### 配置模型
 
@@ -249,28 +246,25 @@ Open browser at `http://<server-IP>:3030`.
 
 **Development Mode (for local development)**
 
-In development mode, frontend uses webpack dev server with hot reload.
+In development mode, frontend uses webpack dev server with hot reload. Backend runs on a separate port.
 
 ```bash
 git clone https://github.com/TheoEquity/Code-Review.git
 cd Code-Review
 git checkout main
 
-# Build frontend
+# Step 1: Start backend (port 5483)
+./build.sh
+./dist/opencodereview serve --addr :5483 &
+
+# Step 2: Open new terminal, start frontend (port 3030)
 cd pages
-npm install
-npm run build
-
-# Start frontend (port 3030)
 npm run dev
-
-# Open new terminal, start backend (port 5483)
-cd ..
-go build -o /tmp/opencodereview ./cmd/opencodereview
-/tmp/opencodereview viewer --addr :5483
 ```
 
-> **Note**: Use production mode for production environments.
+Frontend automatically proxies `/api/*` requests to backend port 5483.
+
+> **Note**: Use production mode (`ocr serve`) for production environments.
 
 #### Quick Start
 
