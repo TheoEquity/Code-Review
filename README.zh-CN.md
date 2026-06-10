@@ -1,224 +1,330 @@
 <p align="center">
-  <a href="https://alibaba.github.io/open-code-review/">
-    <img src="imgs/logo.svg" alt="OpenCodeReview logo" width="240" height="240">
-  </a>
+  <img src="imgs/logo.svg" alt="OpenCodeReview logo" width="240" height="240">
 </p>
 <p align="center">The open source AI code review agent.</p>
 <p align="center">
-  <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
-  <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
-  <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
+  <a href="https://github.com/TheoEquity/Code-Review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/TheoEquity/Code-Review?style=flat-square" /></a>
 </p>
 <p align="center">
-  <a href="README.md">English</a> | 简体中文 | <a href="README.ja-JP.md">日本語</a>
+  English | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a>
 </p>
 
 ---
 
-## Open Code Review 是什么？
+## TheoEquity Code Review
 
-Open Code Review 是一款 AI 驱动的代码审查 CLI 工具。它的前身是阿里集团内部官方 AI 代码审查助手，过去两年在内部服务了数万开发者，识别了数百万个代码缺陷。经过大规模充分验证后，我们将其孵化为开源项目，对社区开放。只需配置一个模型端点即可使用。
+完全自主维护的代码审查 AI Agent 分支。增强了 Web 管理台、全量仓库审计、仓库管理、任务清单、问题清单、审计报告和规则管理能力。
 
-它读取 Git diff，通过具备工具调用能力的 Agent 将变更文件发送至可配置的 LLM，生成具有行级精度的结构化审查意见。Agent 可以读取完整文件内容、搜索代码库、检查其他变更文件以获取上下文，从而进行深度审查——而非仅停留在表面的 diff 反馈。
+**安装请直接使用本仓库的 `main` 分支，不要使用 NPM 或阿里原版 Release。**
 
-![Highlights](imgs/highlights-zh.png)
+### 自开发功能
 
-## 为什么选择 Open Code Review？
+- **Web 管理台**：提供仓库管理、新建任务、任务清单、任务详情、规则管理和模型配置页面。
+- **本地仓库优先**：仓库以本地路径为主，远程地址用于同步；支持保存仓库名称、本地地址、远程地址、文件数、Token、任务数和同步操作。
+- **全量审计模式**：新增 `--full` 模式，可对整个仓库进行审计，并默认过滤明显非源码文件，降低 Token 消耗。
+- **任务状态修正**：运行中、成功、失败、部分完成按会话 JSONL 和进程状态推导，避免成功失败混淆。
+- **问题清单**：从 `code_comment` 工具调用中提取问题，按当前仓库和当前会话隔离展示，支持去重。
+- **审计报告**：对已完成任务生成结构化综合诊断，支持按仓库和会话时间查询，展示风险等级、问题类型、重点模块、Top 修复项和修复路线。
+- **任务详情增强**：展示每个文件的 LLM 请求、响应、工具调用、耗时、Token 和失败信息。
+- **规则管理展示**：展示当前系统的 4 层规则优先级：`--rule`、项目规则、全局规则、系统内置规则；当前默认启用系统内置 `13` 条路径规则和 `1` 条默认规则。
 
-### 通用 Agent 的局限
+### 从本仓库安装
 
-如果你深度用过 Claude Code 等通用 Agent + Skills 方案做代码审查，可能对以下问题深有同感：
+#### 方式一：生产模式（推荐，适用于部署到其他服务器）
 
-- **覆盖不全** —— 变更较大时，Agent 倾向于"偷懒"，选择性地审查部分文件，导致遗漏。
-- **位置漂移** —— 报告的问题与实际代码位置常常对不上，出现行号或文件偏移。
-- **效果不稳定** —— 基于自然语言驱动的 Skills 难以调试，审查质量因提示词的细微差异而大幅波动。
-
-这些问题的根源在于：纯语言驱动的架构缺乏对审查流程的强约束。
-
-### 核心设计：确定性工程 × Agent 混合驱动
-
-Open Code Review 的核心设计理念是将确定性工程与 Agent 结合，各司其职。
-
-**确定性工程——负责强约束**
-
-对代码审查场景中"不能出错"的环节，由工程逻辑而非语言模型来保证：
-
-- **精准的文件筛选** —— 明确哪些文件需要审查、哪些应当过滤，确保真正重要的改动一个不漏。
-- **智能的文件打包** —— 将关联文件归并为同一审查单元（例如 `message_en.properties` 与 `message_zh.properties` 会被打包在一起）。每个包会作为 sub-agent 进行任务，它们之间的上下文是隔离的——这一分治策略在超大变更场景下表现更为稳定，同时天然支持并发审查。
-- **精细化规则匹配** —— 针对不同文件的特征，匹配对应的审查规则，确保模型的注意力足够聚焦，从源头规避信息噪声的干扰。相比纯语言驱动的规则引导，基于模板引擎的规则匹配行为更稳定、结果更可预期。
-- **外挂的定位与反思组件** —— 独立的评论定位模块与评论反思模块，系统性地提升 AI 反馈的位置准确性与内容准确性。
-
-**Agent——负责动态决策**
-
-将 Agent 的优势集中发挥在它真正擅长的地方——动态决策、动态召回上下文：
-
-- **场景化提示词调优** —— 针对代码审查场景深度优化提示词模板，在提升效果的同时有效降低 Token 消耗。
-- **场景化工具集沉淀** —— 基于对大量线上数据中工具调用轨迹的深入分析，包括不同工具的调用频率分布、单一工具的重复调用率、新增工具对整体调用链路的影响等多维度分析，从而对通用 Agent 工具集进行取舍与拆分，最终沉淀出一套在代码审查场景下效果更稳定、行为更可预期的专属工具集。
-
-## 如何使用
-
-### CLI
-
-#### 安装
-
-**通过 NPM 安装（推荐）**
-
-```bash
-npm install -g @alibaba-group/open-code-review
-```
-
-安装后，`ocr` 命令即可全局使用。
-
-**从 GitHub Release 下载**
-
-从 [GitHub Releases](https://github.com/alibaba/open-code-review/releases) 下载最新二进制文件：
-
-```bash
-# macOS (Apple Silicon)
-curl -Lo ocr https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-darwin-arm64
-chmod +x ocr && sudo mv ocr /usr/local/bin/ocr
-
-# macOS (Intel)
-curl -Lo ocr https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-darwin-amd64
-chmod +x ocr && sudo mv ocr /usr/local/bin/ocr
-
-# Linux (x86_64)
-curl -Lo ocr https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-linux-amd64
-chmod +x ocr && sudo mv ocr /usr/local/bin/ocr
-
-# Linux (ARM64)
-curl -Lo ocr https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-linux-arm64
-chmod +x ocr && sudo mv ocr /usr/local/bin/ocr
-
-# Windows (x86_64) — 将 ocr.exe 移动到 PATH 目录中
-curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-windows-amd64.exe
-
-# Windows (ARM64) — 将 ocr.exe 移动到 PATH 目录中
-curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-windows-arm64.exe
-```
-
-**从源码构建**
+生产模式将前端静态资源嵌入到二进制文件中，单个二进制文件即可启动 Web 控制台。
 
 ```bash
 git clone https://github.com/TheoEquity/Code-Review.git
 cd Code-Review
 git checkout main
 
-# 构建前端资源
+# 一键构建（自动编译前端 + 后端）
+./build.sh
+```
+
+安装到系统命令路径：
+
+```bash
+cp ./dist/opencodereview /usr/local/bin/ocr
+```
+
+启动生产模式 Web 控制台：
+
+```bash
+ocr serve --addr :3030
+```
+
+打开浏览器访问 `http://<服务器IP>:3030`。
+
+#### 方式二：开发模式（适用于当前开发服务器）
+
+开发模式下前端使用 webpack dev server，支持热更新。
+
+```bash
+git clone https://github.com/TheoEquity/Code-Review.git
+cd Code-Review
+git checkout main
+
+# 构建前端
 cd pages
 npm install
 npm run build
 
-# 构建 CLI 二进制
+# 启动前端（端口 3030）
+npm run dev
+
+# 新开终端，启动后端（端口 5483）
 cd ..
-go build -o ./dist/opencodereview ./cmd/opencodereview
-sudo cp dist/opencodereview /usr/local/bin/ocr
+go build -o /tmp/opencodereview ./cmd/opencodereview
+/tmp/opencodereview viewer --addr :5483
 ```
 
-#### 快速开始
+> **注意**：生产环境请使用方式一。
 
-**1. 配置 LLM**
-
-**在审查代码之前，必须先配置 LLM。**
+### 配置模型
 
 ```bash
-# 方式 A：交互式配置
+ocr config set llm.url https://your-llm-endpoint
+ocr config set llm.auth_token your-api-key
+ocr config set llm.model your-model-name
+ocr config set llm.use_anthropic true
+```
+
+也可以使用环境变量：
+
+```bash
+export OCR_LLM_URL=https://your-llm-endpoint
+export OCR_LLM_TOKEN=your-api-key
+export OCR_LLM_MODEL=your-model-name
+export OCR_USE_ANTHROPIC=true
+```
+
+测试模型连通性：
+
+```bash
+ocr llm test
+```
+
+### 启动 Web 管理台
+
+#### 生产模式
+
+```bash
+ocr serve --addr :3030
+```
+
+#### 开发模式
+
+当前端用 webpack dev server 运行时，前端端口 3030 会自动代理 API 请求到后端 5483。
+
+如果通过域名或反向代理访问，需要配置允许的 Host：
+
+```bash
+OCR_VIEWER_ALLOWED_HOSTS=your-domain.example.com ocr viewer --addr 127.0.0.1:5483
+```
+
+### CLI 使用方式
+
+在目标项目目录下执行：
+
+```bash
+# 审查当前 Git 工作区变更
+ocr review
+
+# 全量审计当前仓库
+ocr review --full
+
+# 审查两个分支或引用之间的差异
+ocr review --from main --to feature-branch
+
+# 审查指定提交
+ocr review --commit abc123
+```
+
+### Web 管理台使用流程
+
+1. 启动 `ocr serve`。
+2. 打开 Web 管理台。
+3. 在“仓库管理”中添加仓库名称和本地地址，可选填写远程地址。
+4. 在“新建任务”中选择仓库和任务模式，默认推荐使用“全量审计”。
+5. 在“任务清单”查看运行中和已完成任务。
+6. 在“任务详情”中展开问题清单、生成综合诊断、查看已审查文件和每个文件的工具调用细节。
+7. 在“审计报告”中按仓库和会话时间查询结构化综合诊断报告。
+8. 在“规则管理”中查看当前生效规则层级和系统内置规则。
+
+### 规则层级
+
+规则按以下优先级解析，每个文件最终命中 1 条规则后交给 LLM 判断：
+
+| Priority | Source | Path | Status |
+|----------|--------|------|--------|
+| 1 | Custom rule | `--rule <path>` | Only enabled when passed in a review task |
+| 2 | Project rule | `<repoDir>/.opencodereview/rule.json` | Enabled when the repository contains this file |
+| 3 | Global rule | `~/.opencodereview/rule.json` | Enabled when this file exists |
+| 4 | System default | Embedded `system_rules.json` | Always enabled as fallback |
+
+当前默认状态下，自开发系统主要使用第 4 层系统内置规则。
+
+---
+
+## What is Open Code Review?
+
+Open Code Review is an AI-powered code review CLI tool. It originated as Alibaba Group's internal official AI code review assistant — over the past two years, it has served tens of thousands of developers and identified millions of code defects. After thorough validation at massive scale, we incubated it into an open source project for the community. Simply configure a model endpoint to get started.
+
+It reads Git diffs, sends changed files to a configurable LLM via an agent with tool-use capabilities, and generates structured review comments with line-level precision. The agent can read full file contents, search the codebase, inspect other changed files for context, and produce deep reviews — not just surface-level diff feedback.
+
+![Highlights](imgs/highlights-en.png)
+
+## Why Open Code Review?
+
+### The Problem with General-Purpose Agents
+
+If you've used general-purpose agents like Claude Code with Skills for code review, you've likely encountered these pain points:
+
+- **Incomplete coverage** — On larger changesets, agents tend to "cut corners," selectively reviewing only some files and missing others.
+- **Position drift** — Reported issues frequently don't match the actual code location, with line numbers or file references drifting off target.
+- **Unstable quality** — Natural-language-driven Skills are hard to debug, and review quality fluctuates significantly with minor prompt variations.
+
+The root cause: a purely language-driven architecture lacks hard constraints on the review process.
+
+### Core Design: Deterministic Engineering × Agent Hybrid
+
+Open Code Review's core philosophy is to combine deterministic engineering with an agent, each handling what it does best.
+
+**Deterministic Engineering — Hard Constraints**
+
+For review steps that *must not go wrong*, engineering logic — not the language model — guarantees correctness:
+
+- **Precise file selection** — Determines exactly which files need review and which should be filtered, ensuring no important change is missed.
+- **Smart file bundling** — Groups related files into a single review unit (e.g., `message_en.properties` and `message_zh.properties` are bundled together). Each bundle runs as a sub-agent with isolated context — a divide-and-conquer strategy that stays stable on very large changesets and naturally supports concurrent review.
+- **Fine-grained rule matching** — Matches review rules to each file's characteristics, keeping the model's attention sharply focused and eliminating information noise at the source. Compared to purely language-driven rule guidance, template-engine-based rule matching is more stable and predictable.
+- **External positioning and reflection modules** — Independent comment-positioning and comment-reflection modules systematically improve both the location accuracy and content accuracy of AI feedback.
+
+**Agent — Dynamic Decision-Making**
+
+The agent's strengths are concentrated where they matter most — dynamic decisions and dynamic context retrieval:
+
+- **Scenario-tuned prompts** — Prompt templates deeply optimized for code review, improving effectiveness while reducing token consumption.
+- **Scenario-tuned toolset** — Distilled from deep analysis of tool-call traces in large-scale production data — including call frequency distributions, per-tool repetition rates, and the impact of new tools on the overall call chain — resulting in a purpose-built toolset that is more stable and predictable for code review than a generic agent toolkit.
+
+## How to Use
+
+### CLI
+
+#### Install
+
+**Production Mode (Recommended for deployment)**
+
+Production mode embeds frontend static assets into the binary — a single binary file can start the web console.
+
+```bash
+git clone https://github.com/TheoEquity/Code-Review.git
+cd Code-Review
+git checkout main
+
+# One-line build (automatically compiles frontend + backend)
+./build.sh
+```
+
+Install to system path:
+
+```bash
+cp ./dist/opencodereview /usr/local/bin/ocr
+```
+
+Start production mode web console:
+
+```bash
+ocr serve --addr :3030
+```
+
+Open browser at `http://<server-IP>:3030`.
+
+**Development Mode (for local development)**
+
+In development mode, frontend uses webpack dev server with hot reload.
+
+```bash
+git clone https://github.com/TheoEquity/Code-Review.git
+cd Code-Review
+git checkout main
+
+# Build frontend
+cd pages
+npm install
+npm run build
+
+# Start frontend (port 3030)
+npm run dev
+
+# Open new terminal, start backend (port 5483)
+cd ..
+go build -o /tmp/opencodereview ./cmd/opencodereview
+/tmp/opencodereview viewer --addr :5483
+```
+
+> **Note**: Use production mode for production environments.
+
+#### Quick Start
+
+**1. Configure LLM**
+
+**You must configure an LLM before reviewing code.**
+
+```bash
+# Option A: Interactive config
 ocr config set llm.url https://api.anthropic.com/v1/messages
 ocr config set llm.auth_token your-api-key-here
 ocr config set llm.model claude-opus-4-6
 ocr config set llm.use_anthropic true
 
-# 方式 B：环境变量（优先级最高）
+# Option B: Environment variables (highest priority)
 export OCR_LLM_URL=https://api.anthropic.com/v1/messages
 export OCR_LLM_TOKEN=your-api-key-here
 export OCR_LLM_MODEL=claude-opus-4-6
 export OCR_USE_ANTHROPIC=true
 ```
 
-配置存储于 `~/.opencodereview/config.json`。
+Config is stored in `~/.opencodereview/config.json`.
 
-同时兼容了 Claude Code 环境变量（`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL`），并解析 `~/.zshrc` / `~/.bashrc` 中的相关导出。
+It is also compatible with Claude Code environment variables (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`) and parses `~/.zshrc` / `~/.bashrc` for those exports.
 
-> **CC-Switch 用户特别提醒**：如果你使用 [CC-Switch](https://github.com/farion1231/cc-switch) 并开启了[路由服务](https://www.ccswitch.io/zh/docs?section=proxy&item=service)，可以将 `llm.url` 配置成 CC-Switch 启动的代理地址，无需额外配置：
-> - 如果路由的是 **Claude** 供应商：设置 `llm.url` 为 `http://127.0.0.1:15721`
-> - 如果路由的是 **CodeX** 供应商：设置 `llm.url` 为 `http://127.0.0.1:15721/v1`
-> - `llm.model` 根据你的供应商设置进行配置
-> - `llm.auth_token` 可以设置成任意值
-> - `extra_body` 设置依然生效
+> **Note for CC-Switch Users**: If you are using [CC-Switch](https://github.com/farion1231/cc-switch) with [routing service](https://www.ccswitch.io/en/docs?section=proxy&item=service) enabled, you can point `llm.url` to the CC-Switch proxy address without additional configuration:
+> - For **Claude** provider: set `llm.url` to `http://127.0.0.1:15721`
+> - For **CodeX** provider: set `llm.url` to `http://127.0.0.1:15721/v1`
+> - Set `llm.model` according to your provider settings
+> - `llm.auth_token` can be any value
+> - `extra_body` settings still apply
 
-**2. 测试连通性**
+**2. Test Connectivity**
 
 ```bash
 ocr llm test
 ```
 
-**3. 开始审查**
+**3. Review**
 
 ```bash
 cd your-project
 
-# 工作区模式 —— 审查所有暂存、未暂存和未跟踪的变更
+# Workspace mode — review all staged, unstaged, and untracked changes
 ocr review
 
-# 分支范围 —— 比较两个引用
+# Branch range — compare two refs
 ocr review --from main --to feature-branch
 
-# 单个提交
+# Single commit
 ocr review --commit abc123
 ```
 
-### 集成到编程 Agent
+### CLI
 
-OCR 可以无缝集成到 AI 编程 Agent 中，作为斜杠命令使用，在 Agent 工作流中直接进行代码审查。
+#### Quick Start
 
-#### 方式一：作为 Skill 安装
+OCR can be integrated into CI/CD pipelines to automate code review on Merge Requests / Pull Requests.
 
-使用 `npx` 将 OCR skill 安装到项目中：
-
-```bash
-npx skills add alibaba/open-code-review --skill open-code-review
-```
-
-此命令从 [skills 注册表](skills/open-code-review/SKILL.md)安装 `open-code-review` skill，教会你的编程 Agent 如何调用 `ocr` 进行代码审查、按优先级分类问题，并可选择性地应用修复。
-
-#### 方式二：作为 Claude Code Plugin 安装
-
-对于 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)，在 Claude Code 中通过以下命令安装命令插件：
-
-```bash
-/plugin marketplace add alibaba/open-code-review
-/plugin install open-code-review@open-code-review
-```
-
-此命令注册 `/open-code-review:review` 斜杠命令，运行 OCR 并自动过滤和修复问题。
-
-#### 方式三：直接复制命令文件
-
-如果不想使用任何包管理器，可以直接复制命令文件，在 Claude Code 中使用 `/open-code-review` 斜杠命令。
-
-**项目级**（通过 git 与团队共享）：
-
-```bash
-mkdir -p .claude/commands
-curl -o .claude/commands/open-code-review.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
-```
-
-**用户级**（个人全局使用，适用于所有项目）：
-
-```bash
-mkdir -p ~/.claude/commands
-curl -o ~/.claude/commands/open-code-review.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
-```
-
-> **前置条件**：所有集成方式都需要安装 `ocr` CLI 并配置 LLM。参见上方[安装](#安装)和[配置 LLM](#1-配置-llm)。
-
-### CI/CD 集成
-
-OCR 可以集成到 CI/CD 流水线中，在 Merge Request / Pull Request 时自动进行代码审查。
-
-CI 集成的核心命令：
+The core command for CI integration:
 
 ```bash
 ocr review \
@@ -227,135 +333,145 @@ ocr review \
   --format json
 ```
 
-`--format json` 参数输出适合 CI 脚本解析的机器可读结果。
+The `--format json` flag outputs machine-readable results suitable for parsing in CI scripts.
 
-集成示例请参见 [`examples/`](./examples/) 目录：
+See the [`examples/`](./examples/) directory for integration examples:
 
-- [`github_actions/`](./examples/github_actions/) — GitHub Actions 集成示例
-- [`gitlab_ci/`](./examples/gitlab_ci/) — GitLab CI 集成示例
+- [`github_actions/`](./examples/github_actions/) — GitHub Actions integration example
+- [`gitlab_ci/`](./examples/gitlab_ci/) — GitLab CI integration example
 
-## 命令
+## Commands
 
-| 命令 | 别名 | 描述 |
-|------|------|------|
-| `ocr review` | `ocr r` | 开始代码审查 |
-| `ocr rules check <file>` | — | 预览某个文件路径生效的审查规则 |
-| `ocr config set <key> <value>` | — | 设置配置项 |
-| `ocr llm test` | — | 测试 LLM 连通性 |
-| `ocr viewer` | `ocr v` | 启动 WebUI 会话查看器，地址 `localhost:5483` |
-| `ocr version` | — | 显示版本信息 |
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `ocr review` | `ocr r` | Start a code review |
+| `ocr rules check <file>` | — | Preview which review rule applies to a file path |
+| `ocr config set <key> <value>` | — | Set configuration values |
+| `ocr llm test` | — | Test LLM connectivity |
+| `ocr serve` | — | Launch production Web console on `localhost:3030` |
+| `ocr version` | — | Show version info |
 
-### `ocr review` 参数
+### `ocr review` Flags
 
-| 参数 | 缩写 | 默认值 | 描述 |
-|------|------|--------|------|
-| `--repo` | — | 当前目录 | Git 仓库根目录 |
-| `--from` | — | — | 源引用（如 `main`） |
-| `--to` | — | — | 目标引用（如 `feature-branch`） |
-| `--commit` | `-c` | — | 审查单个提交 |
-| `--preview` | `-p` | `false` | 预览将被审查的文件列表，不调用 LLM |
-| `--format` | `-f` | `text` | 输出格式：`text` 或 `json` |
-| `--concurrency` | — | `8` | 最大并发文件审查数 |
-| `--timeout` | — | `10` | 并发任务超时时间（分钟） |
-| `--audience` | — | `human` | `human`（显示进度）或 `agent`（仅输出摘要） |
-| `--rule` | — | — | 自定义 JSON 审查规则路径 |
-| `--max-tools` | — | 内置默认 | 每个文件的最大工具调用轮次；仅在大于模板默认值时生效 |
-| `--max-git-procs` | — | 内置默认 | 最大并发 git 子进程数 |
-| `--tools` | — | — | 自定义 JSON 工具配置路径 |
+| Flag | Shorthand | Default | Description |
+|------|-----------|---------|-------------|
+| `--repo` | — | current dir | Git repository root |
+| `--from` | — | — | Source ref (e.g., `main`) |
+| `--to` | — | — | Target ref (e.g., `feature-branch`) |
+| `--commit` | `-c` | — | Single commit to review |
+| `--preview` | `-p` | `false` | Preview which files will be reviewed without running the LLM |
+| `--format` | `-f` | `text` | Output format: `text` or `json` |
+| `--concurrency` | — | `8` | Max concurrent file reviews |
+| `--timeout` | — | `10` | Concurrent task timeout in minutes |
+| `--audience` | — | `human` | `human` (show progress) or `agent` (summary only) |
+| `--rule` | — | — | Path to custom JSON review rules |
+| `--max-tools` | — | built-in | Max tool call rounds per file; only takes effect when greater than template default |
+| `--max-git-procs` | — | built-in | Max concurrent git subprocesses |
+| `--tools` | — | — | Path to custom JSON tools config |
 
-## 示例
+## Examples
 
 ```bash
-# 预览将被审查的文件（不调用 LLM）
+# Preview which files will be reviewed (no LLM calls)
 ocr review --preview
 ocr review -c abc123 -p
 
-# 使用默认设置审查工作区变更
+# Review workspace changes with default settings
 ocr review
 
-# 以更高并发审查分支差异
+# Review branch diff with higher concurrency
 ocr review --from main --to my-feature --concurrency 4
 
-# 审查特定提交并以 JSON 格式输出详细信息
+# Review a specific commit with verbose JSON output
 ocr review --commit abc123 --format json --audience agent
 
-# 使用自定义审查规则
+# Use custom review rules
 ocr review --rule /path/to/my-rules.json
 
-# 预览某个文件路径生效的规则
+# Preview which rule applies to a file
 ocr rules check src/main/java/com/example/Foo.java
 ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml
 
-# 在浏览器中查看审查会话历史
-ocr viewer
-ocr viewer --addr :3000
+# Start production web console
+ocr serve
+ocr serve --addr :3030
 ```
 
-## 评审规则
+### Web Console Security
 
-OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则：如果文件路径匹配到某个模式，则使用该规则；否则穿透到下一层。
+The web console serves session JSONL contents (LLLM request messages and responses) over HTTP. It enforces a Host-header allowlist on every request: loopback names (`localhost`, `127.0.0.0/8`, `::1`) and the concrete bind host are always allowed. Wildcard binds (`--addr :3030`, `--addr 0.0.0.0:3030`) and other non-loopback Hostnames must be added via the `OCR_VIEWER_ALLOWED_HOSTS` environment variable (comma-separated):
 
-| 优先级 | 来源 | 路径 | 描述 |
-|--------|------|------|------|
-| 1（最高） | `--rule` 参数 | 用户指定路径 | CLI 显式覆盖 |
-| 2 | 项目配置 | `<repoDir>/.opencodereview/rule.json` | 项目级规则，可提交到 git |
-| 3 | 全局配置 | `~/.opencodereview/rule.json` | 用户级个人偏好 |
-| 4（最低） | 系统默认 | 内嵌 `system_rules.json` | 覆盖常见语言和文件类型的内置规则 |
+```bash
+OCR_VIEWER_ALLOWED_HOSTS=review.internal,ocr.lan ocr serve --addr :3030
+```
 
-### 规则文件格式
+This blocks DNS-rebinding attacks against the local web console.
 
-第 1–3 层使用相同的 JSON 格式：
+## Review Rules
+
+OCR resolves review rules using a four-layer priority chain. Each layer uses first-match-wins: if a file path matches a pattern, that rule is used; otherwise it falls through to the next layer.
+
+| Priority | Source | Path | Description |
+|----------|--------|------|-------------|
+| 1 (highest) | `--rule` flag | User-specified path | CLI explicit override |
+| 2 | Project config | `<repoDir>/.opencodereview/rule.json` | Per-project rules, can be committed to git |
+| 3 | Global config | `~/.opencodereview/rule.json` | User-wide personal preferences |
+| 4 (lowest) | System default | Embedded `system_rules.json` | Built-in rules covering common languages and file types |
+
+### Rule File Format
+
+Layers 1–3 share the same JSON format:
 
 ```json
 {
   "rules": [
     {
       "path": "force-api/**/*.java",
-      "rule": "所有新方法必须对必填参数进行空值校验"
+      "rule": "All new methods must validate required parameters for null values"
     },
     {
       "path": "**/*mapper*.xml",
-      "rule": "检查 SQL 注入风险、参数错误和缺少闭合标签"
+      "rule": "Check SQL for injection risks, parameter errors, and missing closing tags"
     }
   ]
 }
 ```
 
-- `path` 支持 `**` 递归匹配和 `{java,kt}` 大括号展开。
-- 在每一层内，规则按声明顺序评估 —— 首次匹配生效。
-- 如果规则文件不存在，将被静默跳过。
+- `path` supports `**` recursive matching and `{java,kt}` brace expansion.
+- Within each layer, rules are evaluated in declaration order — the first match wins.
+- If a rule file does not exist, it is silently skipped.
 
-## 配置参考
+## Configuration Reference
 
-配置文件：`~/.opencodereview/config.json`
+Config file: `~/.opencodereview/config.json`
 
-| 键 | 类型 | 示例 |
-|----|------|------|
+| Key | Type | Example |
+|-----|------|---------|
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
-| `language` | string | `English` \| `Chinese`（默认：Chinese） |
+| `language` | string | `English` \| `Chinese` (default: Chinese) |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
-| `telemetry.otlp_endpoint` | string | OTLP 采集器地址 |
-| `telemetry.content_logging` | boolean | 在遥测数据中包含提示词 |
+| `telemetry.otlp_endpoint` | string | OTLP collector address |
+| `telemetry.content_logging` | boolean | Include prompts in telemetry |
 
-环境变量优先级高于配置文件。
+Environment variables take precedence over the config file.
 
-### 环境变量
+### Environment Variables
 
-| 变量 | 用途 |
-|------|------|
-| `OCR_LLM_URL` | LLM API 端点 URL |
-| `OCR_LLM_TOKEN` | API 密钥 / 认证令牌 |
-| `OCR_LLM_MODEL` | 模型名称 |
-| `OCR_USE_ANTHROPIC` | `true` = Anthropic，`false` = OpenAI |
+| Variable | Purpose |
+|----------|---------|
+| `OCR_LLM_URL` | LLM API endpoint URL |
+| `OCR_LLM_TOKEN` | API key / auth token |
+| `OCR_LLM_MODEL` | Model name |
+| `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
 
 
-## 遥测
+## Telemetry
 
-OpenTelemetry 集成，用于可观测性（spans、metrics）。默认关闭。
+OpenTelemetry integration for observability (spans, metrics). Disabled by default.
 
 ```bash
 ocr config set telemetry.enabled true
@@ -363,16 +479,12 @@ ocr config set telemetry.exporter otlp
 ocr config set telemetry.otlp_endpoint localhost:4317
 ```
 
-设置 `telemetry.content_logging` 可在导出数据中包含 LLM 提示词和响应。
+Set `telemetry.content_logging` to include LLM prompts and responses in exported data.
 
-## 贡献
+## Contributing
 
-参见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) 了解开发环境搭建、编码规范以及如何提交 Pull Request。
+See CONTRIBUTING.md for development setup, coding guidelines, and how to submit pull requests.
 
-## Star History
+## License
 
-[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/open-code-review&type=Date)](https://star-history.com/#alibaba/open-code-review&Date)
-
-## 许可证
-
-[Apache-2.0](LICENSE) — Copyright 2026 Alibaba
+Apache-2.0 — Copyright 2026 TheoEquity

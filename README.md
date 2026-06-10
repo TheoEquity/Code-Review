@@ -1,13 +1,9 @@
 <p align="center">
-  <a href="https://alibaba.github.io/open-code-review/">
-    <img src="imgs/logo.svg" alt="OpenCodeReview logo" width="240" height="240">
-  </a>
+  <img src="imgs/logo.svg" alt="OpenCodeReview logo" width="240" height="240">
 </p>
 <p align="center">The open source AI code review agent.</p>
 <p align="center">
-  <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
-  <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
-  <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
+  <a href="https://github.com/TheoEquity/Code-Review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/TheoEquity/Code-Review?style=flat-square" /></a>
 </p>
 <p align="center">
   English | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a>
@@ -15,9 +11,11 @@
 
 ---
 
-## TheoEquity Code Review 自开发版本
+## TheoEquity Code Review
 
-本仓库基于 Alibaba Open Code Review 二次开发，重点增强了 Web 管理台、全量仓库审计、仓库管理、任务清单、问题清单、审计报告和规则管理能力。后续部署和安装直接使用本仓库的 `main` 分支即可。
+完全自主维护的代码审查 AI Agent 分支。增强了 Web 管理台、全量仓库审计、仓库管理、任务清单、问题清单、审计报告和规则管理能力。
+
+**安装请直接使用本仓库的 `main` 分支，不要使用 NPM 或阿里原版 Release。**
 
 ### 自开发功能
 
@@ -268,50 +266,6 @@ go build -o /tmp/opencodereview ./cmd/opencodereview
 
 > **Note**: Use production mode for production environments.
 
-**Via NPM (Recommended)**
-
-**Via NPM (Recommended)**
-
-```bash
-npm install -g @alibaba-group/open-code-review
-```
-
-After installation, the `ocr` command is available globally.
-
-**From GitHub Release**
-
-Download the latest binary from [GitHub Releases](https://github.com/alibaba/open-code-review/releases):
-
-```bash
-# macOS (Apple Silicon)
-curl -Lo ocr https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-darwin-arm64
-chmod +x ocr && sudo mv ocr /usr/local/bin/ocr
-
-# macOS (Intel)
-curl -Lo ocr https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-darwin-amd64
-chmod +x ocr && sudo mv ocr /usr/local/bin/ocr
-
-# Linux (x86_64)
-curl -Lo ocr https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-linux-amd64
-chmod +x ocr && sudo mv ocr /usr/local/bin/ocr
-
-# Linux (ARM64)
-curl -Lo ocr https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-linux-arm64
-chmod +x ocr && sudo mv ocr /usr/local/bin/ocr
-
-# Windows (x86_64) — move ocr.exe to a directory in your PATH
-curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-windows-amd64.exe
-
-# Windows (ARM64) — move ocr.exe to a directory in your PATH
-curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-windows-arm64.exe
-```
-
-**From Source**
-
-See **Production Mode** or **Development Mode** sections above.
-
-> **Note**: The NPM package and GitHub Release binaries are from the upstream Alibaba repository and do not include our custom features. Always install from source using the instructions above.
-
 #### Quick Start
 
 **1. Configure LLM**
@@ -364,54 +318,9 @@ ocr review --from main --to feature-branch
 ocr review --commit abc123
 ```
 
-### Integrate with Coding Agents
+### CLI
 
-OCR can be seamlessly integrated into AI coding agents as a slash command, enabling code review directly within your agent workflow.
-
-#### Option 1: Install as a Skill
-
-Use `npx` to install the OCR skill into your project:
-
-```bash
-npx skills add alibaba/open-code-review --skill open-code-review
-```
-
-This installs the `open-code-review` skill from the [skills registry](skills/open-code-review/SKILL.md), which teaches your coding agent how to invoke `ocr` for code review, classify issues by priority, and optionally apply fixes.
-
-#### Option 2: Install as a Claude Code Plugin
-
-For [Claude Code](https://docs.anthropic.com/en/docs/claude-code), install the command plugin through the following command in Claude Code:
-
-```bash
-/plugin marketplace add alibaba/open-code-review
-/plugin install open-code-review@open-code-review
-```
-
-This registers the `/open-code-review:review` slash command, which runs OCR and automatically filters and fixes issues.
-
-#### Option 3: Copy the Command File Directly
-
-For a quick setup without any package manager, simply copy the command file to use the `/open-code-review` slash command in Claude Code.
-
-**Project-level** (shared with team via git):
-
-```bash
-mkdir -p .claude/commands
-curl -o .claude/commands/open-code-review.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
-```
-
-**User-level** (personal global use across all projects):
-
-```bash
-mkdir -p ~/.claude/commands
-curl -o ~/.claude/commands/open-code-review.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
-```
-
-> **Prerequisite**: All integration methods require the `ocr` CLI to be installed and an LLM configured. See [Install](#install) and [Configure LLM](#1-configure-llm) above.
-
-### CI/CD Integration
+#### Quick Start
 
 OCR can be integrated into CI/CD pipelines to automate code review on Merge Requests / Pull Requests.
 
@@ -574,12 +483,8 @@ Set `telemetry.content_logging` to include LLM prompts and responses in exported
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding guidelines, and how to submit pull requests.
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/open-code-review&type=Date)](https://star-history.com/#alibaba/open-code-review&Date)
+See CONTRIBUTING.md for development setup, coding guidelines, and how to submit pull requests.
 
 ## License
 
-[Apache-2.0](LICENSE) — Copyright 2026 Alibaba
+Apache-2.0 — Copyright 2026 TheoEquity
