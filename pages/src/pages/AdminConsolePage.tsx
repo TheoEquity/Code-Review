@@ -2445,6 +2445,7 @@ const AdminConsolePage: React.FC = () => {
               <div className="text-base font-semibold text-slate-900">{t('admin.settings.llmTitle')}</div>
               <div className="text-xs text-slate-500">{llmConfigLoading ? t('admin.data.loading') : (llmResolvedVia || t('admin.settings.notConfigured'))}</div>
             </div>
+            <p className="mt-2 text-sm leading-6 text-slate-500">按卡片顺序调用模型；主模型失败时自动尝试后续备用模型。</p>
 
             <div className="mt-4 space-y-4">
               {llmProviders.map((provider, index) => (
