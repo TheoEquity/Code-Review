@@ -153,6 +153,7 @@ type llmConfigPayload struct {
 	Name         string `json:"name"`
 	URL          string `json:"url"`
 	AuthToken    string `json:"authToken"`
+	HasAuthToken bool   `json:"hasAuthToken,omitempty"`
 	Model        string `json:"model"`
 	UseAnthropic bool   `json:"useAnthropic"`
 	ExtraBody    string `json:"extraBody"`
@@ -415,6 +416,7 @@ func llmPayloadFromMap(values map[string]any) llmConfigPayload {
 	}
 	if value, ok := values["auth_token"].(string); ok {
 		payload.AuthToken = value
+		payload.HasAuthToken = strings.TrimSpace(value) != ""
 	}
 	if value, ok := values["model"].(string); ok {
 		payload.Model = value
@@ -430,6 +432,20 @@ func llmPayloadFromMap(values map[string]any) llmConfigPayload {
 	return payload
 }
 
+func redactLLMConfigPayload(payload llmConfigPayload) llmConfigPayload {
+	payload.HasAuthToken = strings.TrimSpace(payload.AuthToken) != "" || payload.HasAuthToken
+	payload.AuthToken = ""
+	return payload
+}
+
+func redactLLMConfigProviders(providers []llmConfigPayload) []llmConfigPayload {
+	redacted := make([]llmConfigPayload, len(providers))
+	for i, provider := range providers {
+		redacted[i] = redactLLMConfigPayload(provider)
+	}
+	return redacted
+}
+
 func handleLLMConfigAPI(w http.ResponseWriter, _ *http.Request) {
 	payload, providers, configPath, err := readLLMConfigPayload()
 	if err != nil {
@@ -437,8 +453,8 @@ func handleLLMConfigAPI(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	response := llmConfigResponse{
-		Config:     payload,
-		Providers:  providers,
+		Config:     redactLLMConfigPayload(payload),
+		Providers:  redactLLMConfigProviders(providers),
 		ConfigPath: configPath,
 		Configured: len(providers) > 0,
 	}
@@ -464,8 +480,19 @@ func handleSaveLLMConfigAPI(w http.ResponseWriter, r *http.Request) {
 	if len(providers) == 0 {
 		providers = []llmConfigPayload{req.llmConfigPayload}
 	}
+	cfg, configPath, err := readViewerConfig()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	oldProviders := existingLLMProviders(cfg)
+
 	providerSections := make([]map[string]any, 0, len(providers))
 	for i := range providers {
+		providers[i].AuthToken = strings.TrimSpace(providers[i].AuthToken)
+		if providers[i].AuthToken == "" {
+			providers[i].AuthToken = existingLLMAuthToken(oldProviders, providers[i], i)
+		}
 		section, err := llmPayloadToConfigMap(providers[i])
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -475,12 +502,6 @@ func handleSaveLLMConfigAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(providerSections) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one model provider is required"})
-		return
-	}
-
-	cfg, configPath, err := readViewerConfig()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -503,6 +524,49 @@ func handleSaveLLMConfigAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handleLLMConfigAPI(w, r)
+}
+
+func existingLLMProviders(cfg map[string]any) []llmConfigPayload {
+	llmSection, ok := cfg["llm"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	var providers []llmConfigPayload
+	if providerValues, ok := llmSection["providers"].([]any); ok {
+		for _, item := range providerValues {
+			if provider, ok := item.(map[string]any); ok {
+				providers = append(providers, llmPayloadFromMap(provider))
+			}
+		}
+	}
+	if len(providers) == 0 {
+		payload := llmPayloadFromMap(llmSection)
+		if payload.AuthToken != "" || payload.URL != "" || payload.Model != "" {
+			providers = append(providers, payload)
+		}
+	}
+	return providers
+}
+
+func existingLLMAuthToken(existing []llmConfigPayload, incoming llmConfigPayload, index int) string {
+	if index >= 0 && index < len(existing) && sameLLMProviderIdentity(existing[index], incoming) {
+		return existing[index].AuthToken
+	}
+	for _, provider := range existing {
+		if sameLLMProviderIdentity(provider, incoming) {
+			return provider.AuthToken
+		}
+	}
+	return ""
+}
+
+func sameLLMProviderIdentity(existing, incoming llmConfigPayload) bool {
+	existingName := normalizeConfigString(existing.Name)
+	incomingName := normalizeConfigString(incoming.Name)
+	if existingName != "" && incomingName != "" && existingName == incomingName {
+		return true
+	}
+	return normalizeConfigString(existing.URL) == normalizeConfigString(incoming.URL) && normalizeConfigString(existing.Model) == normalizeConfigString(incoming.Model)
 }
 
 func cloneConfigMap(values map[string]any) map[string]any {

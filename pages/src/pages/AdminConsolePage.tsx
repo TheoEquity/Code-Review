@@ -169,6 +169,7 @@ interface LLMConfigState {
   name: string;
   url: string;
   authToken: string;
+  hasAuthToken?: boolean;
   model: string;
   useAnthropic: boolean;
   extraBody: string;
@@ -821,6 +822,7 @@ const AdminConsolePage: React.FC = () => {
             name: provider?.name ?? (index === 0 ? 'primary' : `fallback-${index}`),
             url: provider?.url ?? '',
             authToken: provider?.authToken ?? '',
+            hasAuthToken: provider?.hasAuthToken ?? false,
             model: provider?.model ?? '',
             useAnthropic: provider?.useAnthropic ?? true,
             extraBody: provider?.extraBody ?? '',
@@ -2472,7 +2474,8 @@ const AdminConsolePage: React.FC = () => {
                   </label>
                   <label className="mt-3 block text-sm text-slate-700">
                     <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.authToken')}</div>
-                    <input type="password" value={provider.authToken} onChange={(event) => updateLLMProvider(index, { authToken: event.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
+                    <input type="password" value={provider.authToken} placeholder={provider.hasAuthToken ? '已配置，留空表示不修改' : ''} onChange={(event) => updateLLMProvider(index, { authToken: event.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
+                    {provider.hasAuthToken && <div className="mt-1 text-xs text-slate-500">后端已保存密钥；只有输入新值才会覆盖。</div>}
                   </label>
                   <label className="mt-3 block text-sm text-slate-700">
                     <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.extraBody')}</div>
