@@ -484,7 +484,7 @@ func handleSaveLLMConfigAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	llmSection := providerSections[0]
+	llmSection := cloneConfigMap(providerSections[0])
 	llmSection["providers"] = providerSections
 	cfg["llm"] = llmSection
 
@@ -503,6 +503,14 @@ func handleSaveLLMConfigAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handleLLMConfigAPI(w, r)
+}
+
+func cloneConfigMap(values map[string]any) map[string]any {
+	cloned := make(map[string]any, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func llmPayloadToConfigMap(payload llmConfigPayload) (map[string]any, error) {
