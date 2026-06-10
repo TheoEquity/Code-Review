@@ -873,7 +873,7 @@ const AdminConsolePage: React.FC = () => {
       const response = await fetch('/api/config/llm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providers: llmProviders }),
+        body: JSON.stringify({ providers: llmProviders.map((provider) => ({ ...provider, authToken: provider.hasAuthToken ? '' : provider.authToken })) }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -2474,8 +2474,8 @@ const AdminConsolePage: React.FC = () => {
                   </label>
                   <label className="mt-3 block text-sm text-slate-700">
                     <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.authToken')}</div>
-                    <input type="password" value={provider.authToken} placeholder={provider.hasAuthToken ? '已配置，留空表示不修改' : ''} onChange={(event) => updateLLMProvider(index, { authToken: event.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none" />
-                    {provider.hasAuthToken && <div className="mt-1 text-xs text-slate-500">后端已保存密钥；只有输入新值才会覆盖。</div>}
+                    <input type="password" value={provider.hasAuthToken ? '******' : provider.authToken} disabled={provider.hasAuthToken} onChange={(event) => updateLLMProvider(index, { authToken: event.target.value })} className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500" />
+                    {provider.hasAuthToken && <div className="mt-1 text-xs text-slate-500">密钥已保存。需要更换时请移除此模型后重新添加。</div>}
                   </label>
                   <label className="mt-3 block text-sm text-slate-700">
                     <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">{t('admin.settings.extraBody')}</div>
