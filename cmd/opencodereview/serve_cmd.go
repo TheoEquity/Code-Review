@@ -44,25 +44,56 @@ func runServe(args []string) error {
 		return fmt.Errorf("resolve sessions root: %w", err)
 	}
 
-	// Create API mux
-	apiMux := createAPIMux(root)
-
 	// Create static file server for frontend
 	staticFS, err := fs.Sub(static.WebFS, "dist")
 	if err != nil {
 		return fmt.Errorf("create static FS: %w", err)
 	}
-	staticServer := http.FileServer(http.FS(staticFS))
 
 	// Combined mux: /api/* → API, /* → static files (SPA fallback)
 	mux := http.NewServeMux()
-	mux.Handle("/api/", apiMux)
+	mux.Handle("/api/", createAPIMux(root))
+	
+	// Serve static files with SPA fallback
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// SPA: all non-API routes serve index.html
-		if !strings.HasPrefix(r.URL.Path, "/api/") {
-			r.URL.Path = "/index.html"
+		// API routes should not reach here, but just in case
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			http.NotFound(w, r)
+			return
 		}
-		staticServer.ServeHTTP(w, r)
+		
+		// Try to serve the file from static FS
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if path == "" {
+			path = "index.html"
+		}
+		
+		data, err := fs.ReadFile(staticFS, path)
+		if err != nil {
+			// File not found, serve index.html for SPA routing
+			data, err = fs.ReadFile(staticFS, "index.html")
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+		}
+		
+		// Determine content type
+		contentType := "text/html; charset=utf-8"
+		if strings.HasSuffix(path, ".js") {
+			contentType = "application/javascript"
+		} else if strings.HasSuffix(path, ".css") {
+			contentType = "text/css"
+		} else if strings.HasSuffix(path, ".svg") {
+			contentType = "image/svg+xml"
+		} else if strings.HasSuffix(path, ".png") {
+			contentType = "image/png"
+		} else if strings.HasSuffix(path, ".ico") {
+			contentType = "image/x-icon"
+		}
+		
+		w.Header().Set("Content-Type", contentType)
+		w.Write(data)
 	})
 
 	// Host guard for security
