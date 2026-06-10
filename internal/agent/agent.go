@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -571,6 +572,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 	}
 
 	newPath := d.NewPath
+	promptDiff := a.promptDiff(d)
 
 	relatedChangeContext := a.buildRelatedChangeContext(newPath, d.Diff)
 
@@ -589,7 +591,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 			telemetry.AnyToAttr("threshold", threshold))
 	} else if a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 {
 		var err error
-		planResult, err = a.executePlanPhase(ctx, newPath, d.Diff, relatedChangeContext, rule)
+		planResult, err = a.executePlanPhase(ctx, newPath, promptDiff, relatedChangeContext, rule)
 		if err != nil {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Plan phase failed for %s: %v (continuing without plan)\n", newPath, err)
 			telemetry.Eventf(ctx, "plan.failed", err.Error(),
@@ -613,7 +615,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 		"{{system_rule}}":              rule,
 		"{{change_files}}":             relatedChangeContext,
 		"{{rag_context}}":              relatedChangeContext,
-		"{{diff}}":                     d.Diff,
+		"{{diff}}":                     promptDiff,
 		"{{requirement_background}}":   a.args.Background,
 		"{{plan_guidance}}":            planResult,
 	}
@@ -650,6 +652,101 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 	}
 
 	return a.performLlmCodeReview(ctx, messages, newPath)
+}
+
+func (a *Agent) promptDiff(d model.Diff) string {
+	if a.args.FileFilter == nil || a.args.FileFilter.MaxDiffBytes <= 0 || len(d.Diff) <= a.args.FileFilter.MaxDiffBytes {
+		return d.Diff
+	}
+	return compactDiffForPrompt(effectivePath(d), d.Diff, a.args.FileFilter.MaxDiffBytes)
+}
+
+func compactDiffForPrompt(path, rawDiff string, maxBytes int) string {
+	if maxBytes <= 0 || len(rawDiff) <= maxBytes {
+		return rawDiff
+	}
+	if maxBytes < 1200 {
+		maxBytes = 1200
+	}
+
+	lines := strings.Split(rawDiff, "\n")
+	headerLines := make([]string, 0, 8)
+	hunkLines := make([]string, 0, 24)
+	for _, line := range lines {
+		if strings.HasPrefix(line, "diff --git ") || strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
+			headerLines = append(headerLines, line)
+			continue
+		}
+		if strings.HasPrefix(line, "@@") || strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") {
+			hunkLines = append(hunkLines, line)
+		}
+	}
+
+	if len(hunkLines) == 0 {
+		return rawDiff[:maxBytes] + "\n... diff truncated for template-focused review ..."
+	}
+
+	budget := maxBytes - 320
+	if budget < 800 {
+		budget = 800
+	}
+	headBudget := budget / 2
+	tailBudget := budget - headBudget
+	head := takeLinesWithinBytes(hunkLines, headBudget)
+	tail := takeLinesWithinBytesFromEnd(hunkLines, tailBudget)
+
+	var sb strings.Builder
+	sb.WriteString("Diff compacted for template-focused review. Full diff remains available through file_read_diff.\n")
+	sb.WriteString("File: ")
+	sb.WriteString(path)
+	sb.WriteString("\nOriginal bytes: ")
+	sb.WriteString(strconv.Itoa(len(rawDiff)))
+	sb.WriteString("\n\n")
+	for _, line := range headerLines {
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+	for _, line := range head {
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("... middle of diff omitted ...\n")
+	for _, line := range tail {
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func takeLinesWithinBytes(lines []string, maxBytes int) []string {
+	selected := make([]string, 0, len(lines))
+	used := 0
+	for _, line := range lines {
+		lineBytes := len(line) + 1
+		if used > 0 && used+lineBytes > maxBytes {
+			break
+		}
+		selected = append(selected, line)
+		used += lineBytes
+	}
+	return selected
+}
+
+func takeLinesWithinBytesFromEnd(lines []string, maxBytes int) []string {
+	selected := make([]string, 0, len(lines))
+	used := 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		lineBytes := len(lines[i]) + 1
+		if used > 0 && used+lineBytes > maxBytes {
+			break
+		}
+		selected = append(selected, lines[i])
+		used += lineBytes
+	}
+	for i, j := 0, len(selected)-1; i < j; i, j = i+1, j-1 {
+		selected[i], selected[j] = selected[j], selected[i]
+	}
+	return selected
 }
 
 // buildChangeFilesExcept returns a formatted list of changed files except the given path.

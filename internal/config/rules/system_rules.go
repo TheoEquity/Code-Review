@@ -189,6 +189,7 @@ type ProjectRule struct {
 	FileHints    []string           `json:"fileHints,omitempty"`
 	SkipHints    []string           `json:"skipHints,omitempty"`
 	MinHintScore int                `json:"minHintScore,omitempty"`
+	MaxDiffBytes int                `json:"maxDiffBytes,omitempty"`
 	MaxFiles     int                `json:"maxFiles,omitempty"`
 }
 
@@ -200,6 +201,7 @@ type FileFilter struct {
 	FileHints    []string
 	SkipHints    []string
 	MinHintScore int
+	MaxDiffBytes int
 	MaxFiles     int
 }
 
@@ -336,7 +338,7 @@ func buildFileFilter(layers ...*ProjectRule) *FileFilter {
 		if pr == nil {
 			continue
 		}
-		if len(pr.Include) == 0 && len(pr.Exclude) == 0 && len(pr.FileHints) == 0 && len(pr.SkipHints) == 0 && pr.MinHintScore <= 0 && pr.MaxFiles <= 0 {
+		if len(pr.Include) == 0 && len(pr.Exclude) == 0 && len(pr.FileHints) == 0 && len(pr.SkipHints) == 0 && pr.MinHintScore <= 0 && pr.MaxDiffBytes <= 0 && pr.MaxFiles <= 0 {
 			continue
 		}
 		f := &FileFilter{}
@@ -353,6 +355,7 @@ func buildFileFilter(layers ...*ProjectRule) *FileFilter {
 			f.SkipHints = append(f.SkipHints, strings.ToLower(hint))
 		}
 		f.MinHintScore = pr.MinHintScore
+		f.MaxDiffBytes = pr.MaxDiffBytes
 		f.MaxFiles = pr.MaxFiles
 		return f
 	}

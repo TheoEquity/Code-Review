@@ -195,6 +195,31 @@ func TestPlanTemplateReplacementsIncludesRagContext(t *testing.T) {
 	}
 }
 
+func TestCompactDiffForPromptKeepsHeadAndTail(t *testing.T) {
+	var raw strings.Builder
+	raw.WriteString("diff --git a/app.go b/app.go\n--- a/app.go\n+++ b/app.go\n")
+	for i := 0; i < 120; i++ {
+		raw.WriteString("@@ -1 +1 @@\n")
+		raw.WriteString("-old line ")
+		raw.WriteString(strings.Repeat("x", 20))
+		raw.WriteString("\n")
+		raw.WriteString("+new line ")
+		raw.WriteString(strings.Repeat("y", 20))
+		raw.WriteString("\n")
+	}
+
+	got := compactDiffForPrompt("app.go", raw.String(), 1600)
+	if len(got) >= len(raw.String()) {
+		t.Fatalf("expected compacted diff to be shorter")
+	}
+	if !strings.Contains(got, "Diff compacted for template-focused review") || !strings.Contains(got, "Full diff remains available through file_read_diff") {
+		t.Fatalf("expected compact diff notice, got %q", got[:min(len(got), 200)])
+	}
+	if !strings.Contains(got, "diff --git a/app.go b/app.go") || !strings.Contains(got, "middle of diff omitted") {
+		t.Fatalf("expected header and omission marker, got %q", got)
+	}
+}
+
 func TestCompactSummary(t *testing.T) {
 	longSummary := strings.Repeat("x", 300)
 	got := compactSummary(longSummary)
