@@ -61,7 +61,24 @@ type sessionDetailResponse struct {
 }
 
 type rulesOverviewResponse struct {
-	Layers []ruleLayerSummary `json:"layers"`
+	Layers        []ruleLayerSummary        `json:"layers"`
+	Optimizations []ruleOptimizationSummary `json:"optimizations"`
+	PromptLayers  []promptLayerSummary      `json:"promptLayers"`
+}
+
+type ruleOptimizationSummary struct {
+	Title       string   `json:"title"`
+	Stage       string   `json:"stage"`
+	Description string   `json:"description"`
+	Source      string   `json:"source"`
+	Details     []string `json:"details,omitempty"`
+}
+
+type promptLayerSummary struct {
+	Name        string   `json:"name"`
+	Location    string   `json:"location"`
+	Description string   `json:"description"`
+	Examples    []string `json:"examples,omitempty"`
 }
 
 type ruleLayerSummary struct {
@@ -1381,7 +1398,85 @@ func handleRulesAPI(w http.ResponseWriter, _ *http.Request, root string) {
 		layers = append(layers[:2], append(projectRules, layers[2:]...)...)
 	}
 
-	writeJSON(w, http.StatusOK, rulesOverviewResponse{Layers: layers})
+	writeJSON(w, http.StatusOK, rulesOverviewResponse{
+		Layers:        layers,
+		Optimizations: rulesOptimizationSummaries(),
+		PromptLayers:  promptLayerSummaries(),
+	})
+}
+
+func rulesOptimizationSummaries() []ruleOptimizationSummary {
+	return []ruleOptimizationSummary{
+		{
+			Title:       "Template file narrowing",
+			Stage:       "Before review dispatch",
+			Description: "Specialized audit templates use fileHints and maxFiles to reduce the candidate file set before LLM review starts.",
+			Source:      "rules/security.json, rules/quality.json, rules/performance.json, rules/architecture.json",
+			Details: []string{
+				"Path hints and lightweight content hints are both used for scoring.",
+				"When no hint matches, the system falls back to existing filtered files.",
+			},
+		},
+		{
+			Title:       "Lightweight RAG context",
+			Stage:       "Per-file prompt assembly",
+			Description: "Each file review receives only the most related changed files instead of the full change list.",
+			Source:      "internal/agent/agent.go, internal/agent/file_index.go",
+			Details: []string{
+				"Related context is capped at 8 files per reviewed file.",
+				"The {{rag_context}} placeholder and {{change_files}} both receive this narrowed context.",
+			},
+		},
+		{
+			Title:       "Code summary cache",
+			Stage:       "Lightweight index build",
+			Description: "The index reads only the first 32KB of each candidate file and caches extracted declarations by size and mtime.",
+			Source:      "~/.opencodereview/cache/light-index/*.json",
+			Details: []string{
+				"Summaries include function, type, class, interface, export, router, and route declarations.",
+				"Unchanged files reuse cached summaries on later audits.",
+			},
+		},
+		{
+			Title:       "Slim default prompts",
+			Stage:       "Template loading",
+			Description: "Long default system prompts were moved into concise template files, keeping dynamic audit rules in user prompts.",
+			Source:      "internal/config/template/task_template.json",
+			Details: []string{
+				"System prompts now hold only stable role and hard constraints.",
+				"Audit rules, RAG context, diffs, plan guidance, and tools stay in user prompts.",
+			},
+		},
+	}
+}
+
+func promptLayerSummaries() []promptLayerSummary {
+	return []promptLayerSummary{
+		{
+			Name:        "System prompt",
+			Location:    "internal/config/template/task_template.json",
+			Description: "Short stable role and hard constraints for main review, planning, memory compression, and relocation tasks.",
+			Examples:    []string{"Review only added or modified code", "Output actionable findings only"},
+		},
+		{
+			Name:        "Dynamic user prompt",
+			Location:    "internal/agent/agent.go + task_template.json placeholders",
+			Description: "Per-file diff, RAG context, requirement background, checklist, and plan guidance are injected for each task.",
+			Examples:    []string{"{{diff}}", "{{rag_context}}", "{{system_rule}}", "{{plan_guidance}}"},
+		},
+		{
+			Name:        "Audit template rules",
+			Location:    "rules/*.json",
+			Description: "Specialized rule files provide defaultRule, fileHints, and maxFiles for focused audit modes.",
+			Examples:    []string{"fileHints", "maxFiles", "defaultRule"},
+		},
+		{
+			Name:        "Tool guidance",
+			Location:    "PLAN_TASK user prompt",
+			Description: "Tool descriptions are rendered in the planning user message so they do not permanently inflate the system prompt.",
+			Examples:    []string{"{{plan_tools}}"},
+		},
+	}
 }
 
 func handleRepoStatusAPI(w http.ResponseWriter, _ *http.Request, root, repo string) {

@@ -120,6 +120,21 @@ interface RuleLayer {
   pathRules?: Array<{ pattern: string; rule: string }>;
 }
 
+interface RuleOptimization {
+  title: string;
+  stage: string;
+  description: string;
+  source: string;
+  details?: string[];
+}
+
+interface PromptLayer {
+  name: string;
+  location: string;
+  description: string;
+  examples?: string[];
+}
+
 interface IssueListItem {
   path: string;
   content: string;
@@ -249,6 +264,8 @@ const AdminConsolePage: React.FC = () => {
   const [issueListExpanded, setIssueListExpanded] = useState(false);
   const [reviewFilesExpanded, setReviewFilesExpanded] = useState(false);
   const [ruleLayers, setRuleLayers] = useState<RuleLayer[]>([]);
+  const [ruleOptimizations, setRuleOptimizations] = useState<RuleOptimization[]>([]);
+  const [promptLayers, setPromptLayers] = useState<PromptLayer[]>([]);
   const [rulesLoading, setRulesLoading] = useState(false);
   const [llmConfig, setLlmConfig] = useState<LLMConfigState>({
     url: '',
@@ -768,10 +785,14 @@ const AdminConsolePage: React.FC = () => {
         const data = await response.json();
         if (!cancelled) {
           setRuleLayers(Array.isArray(data.layers) ? data.layers : []);
+          setRuleOptimizations(Array.isArray(data.optimizations) ? data.optimizations : []);
+          setPromptLayers(Array.isArray(data.promptLayers) ? data.promptLayers : []);
         }
       } catch {
         if (!cancelled) {
           setRuleLayers([]);
+          setRuleOptimizations([]);
+          setPromptLayers([]);
         }
       } finally {
         if (!cancelled) {
@@ -2303,6 +2324,65 @@ const AdminConsolePage: React.FC = () => {
               <div className="text-xs text-slate-500">{rulesLoading ? t('admin.data.loading') : `${ruleLayers.length}`}</div>
             </div>
             <div className="mt-4 space-y-4">
+              {ruleOptimizations.length > 0 && (
+                <div className="rounded-2xl border border-brand-100 bg-brand-50/60 p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">审计优化链路</div>
+                      <div className="mt-1 text-xs text-slate-600">展示专项筛选、RAG 摘要缓存和 prompt 瘦身在审计流程中的生效位置。</div>
+                    </div>
+                    <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-brand-700">{ruleOptimizations.length} 项</span>
+                  </div>
+                  <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                    {ruleOptimizations.map((item) => (
+                      <div key={item.title} className="rounded-xl border border-brand-100 bg-white p-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-semibold text-brand-700">{item.stage}</span>
+                          <span className="text-sm font-semibold text-slate-900">{item.title}</span>
+                        </div>
+                        <div className="mt-2 text-sm leading-6 text-slate-700">{item.description}</div>
+                        <div className="mt-2 break-all text-xs text-slate-500">{item.source}</div>
+                        {item.details && item.details.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {item.details.map((detail) => (
+                              <span key={detail} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600">{detail}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {promptLayers.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">四层提示词结构</div>
+                      <div className="mt-1 text-xs text-slate-600">固定约束、动态上下文、专项规则和工具说明分层展示，避免都堆进 system prompt。</div>
+                    </div>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{promptLayers.length} 层</span>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    {promptLayers.map((layer) => (
+                      <div key={layer.name} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-sm font-semibold text-slate-900">{layer.name}</div>
+                        <div className="mt-1 break-all text-xs text-brand-600">{layer.location}</div>
+                        <div className="mt-3 text-xs leading-5 text-slate-600">{layer.description}</div>
+                        {layer.examples && layer.examples.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {layer.examples.map((example) => (
+                              <span key={example} className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-600">{example}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {ruleLayers.map((layer) => (
                 <div key={`${layer.source}-${layer.path}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
                   <div className="flex items-start justify-between gap-4">
