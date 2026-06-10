@@ -23,6 +23,44 @@ This fork adds enhanced features for enterprise use cases:
 
 **Installation: Always use this repository's `main` branch. The NPM package and upstream releases do not include these enhancements.**
 
+## Quick Install (Production Mode)
+
+Recommended for deploying to production servers.
+
+### Option 1: One-line Install (Recommended)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/TheoEquity/Code-Review/main/install.sh | bash
+```
+
+### Option 2: Manual Download
+
+Download from [GitHub Releases](https://github.com/TheoEquity/Code-Review/releases):
+
+```bash
+# Linux x86_64
+wget https://github.com/TheoEquity/Code-Review/releases/latest/download/opencodereview-linux-amd64 -O ocr
+chmod +x ocr && sudo mv ocr /usr/local/bin/
+
+# Linux ARM64
+wget https://github.com/TheoEquity/Code-Review/releases/latest/download/opencodereview-linux-arm64 -O ocr
+chmod +x ocr && sudo mv ocr /usr/local/bin/
+
+# macOS Apple Silicon
+wget https://github.com/TheoEquity/Code-Review/releases/latest/download/opencodereview-darwin-arm64 -O ocr
+chmod +x ocr && sudo mv ocr /usr/local/bin/
+```
+
+### Start Web Console
+
+```bash
+ocr serve --addr :3030
+```
+
+Open browser at `http://localhost:3030`.
+
+---
+
 ### 自开发功能
 
 - **Web 管理台**：提供仓库管理、新建任务、任务清单、任务详情、规则管理和模型配置页面。
@@ -34,56 +72,42 @@ This fork adds enhanced features for enterprise use cases:
 - **任务详情增强**：展示每个文件的 LLM 请求、响应、工具调用、耗时、Token 和失败信息。
 - **规则管理展示**：展示当前系统的 4 层规则优先级：`--rule`、项目规则、全局规则、系统内置规则；当前默认启用系统内置 `13` 条路径规则和 `1` 条默认规则。
 
-### 从本仓库安装
+## Installation Options
 
-#### 方式一：生产模式（推荐，适用于部署到其他服务器）
+### Production Mode (Servers)
 
-生产模式将前端静态资源嵌入到二进制文件中，单个二进制文件即可启动 Web 控制台。
+**Recommended: Quick Install** - See [Quick Install](#quick-install-production-mode) above.
+
+**Alternative: Build from Source**
 
 ```bash
 git clone https://github.com/TheoEquity/Code-Review.git
 cd Code-Review
-git checkout main
-
-# 一键构建（自动编译前端 + 后端）
 ./build.sh
-```
-
-安装到系统命令路径：
-
-```bash
 cp ./dist/opencodereview /usr/local/bin/ocr
-```
-
-启动生产模式 Web 控制台：
-
-```bash
 ocr serve --addr :3030
 ```
 
-打开浏览器访问 `http://<服务器IP>:3030`。
+### Development Mode (Local Development)
 
-#### 方式二：开发模式（适用于当前开发服务器）
-
-开发模式下前端使用 webpack dev server，支持热更新。后端用 `serve` 命令启动（不同端口）。
+For active development with hot reload:
 
 ```bash
 git clone https://github.com/TheoEquity/Code-Review.git
 cd Code-Review
-git checkout main
 
-# 步骤 1: 启动后端（端口 5483）
+# Terminal 1: Backend (port 5483)
 ./build.sh
 ./dist/opencodereview serve --addr :5483 &
 
-# 步骤 2: 新开终端，启动前端（端口 3030）
+# Terminal 2: Frontend (port 3030)
 cd pages
 npm run dev
 ```
 
-前端会自动 proxy `/api/*` 请求到后端 5483。
+Open browser at `http://localhost:3030`. Frontend proxies `/api/*` to backend.
 
-> **注意**：生产环境请使用方式一（单端口生产模式）。
+---
 
 ### 配置模型
 
