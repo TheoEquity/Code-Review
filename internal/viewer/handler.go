@@ -63,7 +63,6 @@ type sessionDetailResponse struct {
 type rulesOverviewResponse struct {
 	Layers        []ruleLayerSummary        `json:"layers"`
 	Optimizations []ruleOptimizationSummary `json:"optimizations"`
-	PromptLayers  []promptLayerSummary      `json:"promptLayers"`
 }
 
 type ruleOptimizationSummary struct {
@@ -72,13 +71,6 @@ type ruleOptimizationSummary struct {
 	Description string   `json:"description"`
 	Source      string   `json:"source"`
 	Details     []string `json:"details,omitempty"`
-}
-
-type promptLayerSummary struct {
-	Name        string   `json:"name"`
-	Location    string   `json:"location"`
-	Description string   `json:"description"`
-	Examples    []string `json:"examples,omitempty"`
 }
 
 type ruleLayerSummary struct {
@@ -1404,7 +1396,6 @@ func handleRulesAPI(w http.ResponseWriter, _ *http.Request, root string) {
 	writeJSON(w, http.StatusOK, rulesOverviewResponse{
 		Layers:        layers,
 		Optimizations: rulesOptimizationSummaries(),
-		PromptLayers:  promptLayerSummaries(),
 	})
 }
 
@@ -1450,35 +1441,6 @@ func rulesOptimizationSummaries() []ruleOptimizationSummary {
 				"System prompts now hold only stable role and hard constraints.",
 				"Audit rules, RAG context, diffs, plan guidance, and tools stay in user prompts.",
 			},
-		},
-	}
-}
-
-func promptLayerSummaries() []promptLayerSummary {
-	return []promptLayerSummary{
-		{
-			Name:        "System prompt",
-			Location:    "internal/config/template/task_template.json",
-			Description: "Short stable role and hard constraints for main review, planning, memory compression, and relocation tasks.",
-			Examples:    []string{"Review only added or modified code", "Output actionable findings only"},
-		},
-		{
-			Name:        "Dynamic user prompt",
-			Location:    "internal/agent/agent.go + task_template.json placeholders",
-			Description: "Per-file diff, RAG context, requirement background, checklist, and plan guidance are injected for each task.",
-			Examples:    []string{"{{diff}}", "{{rag_context}}", "{{system_rule}}", "{{plan_guidance}}"},
-		},
-		{
-			Name:        "Audit template rules",
-			Location:    "P1 --rule -> rules/*.json",
-			Description: "Specialized rule files reuse the existing highest-priority rule layer and provide defaultRule, fileHints, and maxFiles for focused audit modes.",
-			Examples:    []string{"rules/security.json", "fileHints", "maxFiles"},
-		},
-		{
-			Name:        "Tool guidance",
-			Location:    "PLAN_TASK user prompt",
-			Description: "Tool descriptions are rendered in the planning user message so they do not permanently inflate the system prompt.",
-			Examples:    []string{"{{plan_tools}}"},
 		},
 	}
 }
