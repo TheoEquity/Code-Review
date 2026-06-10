@@ -124,7 +124,7 @@ ocr serve --addr :3030
 如果通过域名或反向代理访问，需要配置允许的 Host：
 
 ```bash
-OCR_VIEWER_ALLOWED_HOSTS=your-domain.example.com ocr viewer --addr 127.0.0.1:5483
+OCR_VIEWER_ALLOWED_HOSTS=your-domain.example.com ocr serve --addr :3030
 ```
 
 ### CLI 使用方式
