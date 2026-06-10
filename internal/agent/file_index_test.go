@@ -75,6 +75,44 @@ func TestBuildLightFileIndexBuildsSummariesWithoutHints(t *testing.T) {
 	}
 }
 
+func TestRepoFilePathRejectsUnsafePaths(t *testing.T) {
+	repoDir := t.TempDir()
+	for _, path := range []string{"../secret.go", "/tmp/secret.go", ".."} {
+		if fullPath, ok := repoFilePath(repoDir, path); ok {
+			t.Fatalf("expected unsafe path %q to be rejected, got %q", path, fullPath)
+		}
+	}
+
+	fullPath, ok := repoFilePath(repoDir, "internal/agent/file_index.go")
+	if !ok || !strings.HasPrefix(fullPath, repoDir) {
+		t.Fatalf("expected repo path to be accepted, got ok=%v path=%q", ok, fullPath)
+	}
+}
+
+func TestBuildLightFileIndexDoesNotReadSymlinkTarget(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	targetPath := filepath.Join(t.TempDir(), "target.go")
+	if err := os.WriteFile(targetPath, []byte("package outside\n\nfunc OutsideSecret() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := filepath.Join(repoDir, "internal", "linked.go")
+	if err := os.MkdirAll(filepath.Dir(symlinkPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetPath, symlinkPath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	agent := &Agent{args: Args{RepoDir: repoDir}}
+	index := agent.buildLightFileIndex([]model.Diff{{NewPath: "internal/linked.go", Diff: "+func DiffOnly() {}"}}, []string{"outside"})
+
+	entry := index["internal/linked.go"]
+	if strings.Contains(entry.Summary, "OutsideSecret") || len(entry.HintMatches) != 0 {
+		t.Fatalf("expected symlink target to be ignored, got %#v", entry)
+	}
+}
+
 func TestBuildRelatedChangeContextUsesSummariesAndLimitsFiles(t *testing.T) {
 	current := model.Diff{NewPath: "internal/auth/service.go", Diff: "+func ValidateToken(token string) error { return nil }"}
 	diffs := []model.Diff{current}

@@ -28,9 +28,9 @@ func (a *Agent) buildLightFileIndex(diffs []model.Diff, hints []string) lightFil
 	changed := false
 	for _, d := range diffs {
 		path := effectivePath(d)
-		fullPath := filepath.Join(a.args.RepoDir, path)
-		stat, err := os.Stat(fullPath)
-		if err != nil || stat.IsDir() {
+		fullPath, ok := repoFilePath(a.args.RepoDir, path)
+		stat, err := os.Lstat(fullPath)
+		if !ok || err != nil || stat.IsDir() || stat.Mode()&os.ModeSymlink != 0 {
 			summary := summarizeFileSample(path, d.Diff)
 			entry := lightFileEntry{Path: path, Summary: summary, HintMatches: matchHints(path, d.Diff+"\n"+summary, hints)}
 			idx[path] = entry
@@ -60,6 +60,28 @@ func (a *Agent) buildLightFileIndex(diffs []model.Diff, hints []string) lightFil
 		saveLightFileIndexCache(a.args.RepoDir, hints, cache)
 	}
 	return idx
+}
+
+func repoFilePath(repoDir, path string) (string, bool) {
+	if repoDir == "" || path == "" || filepath.IsAbs(path) {
+		return "", false
+	}
+
+	cleanPath := filepath.Clean(path)
+	if cleanPath == "." || strings.HasPrefix(cleanPath, ".."+string(filepath.Separator)) || cleanPath == ".." {
+		return "", false
+	}
+
+	repoAbs, err := filepath.Abs(repoDir)
+	if err != nil {
+		return "", false
+	}
+	fullPath := filepath.Join(repoAbs, cleanPath)
+	relPath, err := filepath.Rel(repoAbs, fullPath)
+	if err != nil || relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return fullPath, true
 }
 
 func summarizeFileSample(path, sample string) string {
