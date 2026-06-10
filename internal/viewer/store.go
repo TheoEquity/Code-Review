@@ -97,6 +97,12 @@ type SessionSummary struct {
 	Status        string    `json:"status"`
 }
 
+func normalizeSessionSummary(summary *SessionSummary) {
+	if strings.TrimSpace(summary.TemplateName) == "" {
+		summary.TemplateName = "全面审计"
+	}
+}
+
 // ListSessions returns lightweight summaries for all sessions in a repo subdir.
 func ListSessions(root, encodedRepo string) ([]SessionSummary, error) {
 	repoDir := filepath.Join(root, encodedRepo)
@@ -120,6 +126,7 @@ func ListSessions(root, encodedRepo string) ([]SessionSummary, error) {
 		}
 		s.SessionID = sessionID
 		s.EncodedRepo = encodedRepo
+		normalizeSessionSummary(&s)
 		summaries = append(summaries, s)
 	}
 
@@ -249,6 +256,7 @@ func peekSession(path string) (SessionSummary, error) {
 	} else {
 		summary.Status = "failed"
 	}
+	normalizeSessionSummary(&summary)
 	return summary, scanner.Err()
 }
 
@@ -582,6 +590,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	})
 
 	vs.Summary.SessionID = sessionID
+	normalizeSessionSummary(&vs.Summary)
 	return vs, scanner.Err()
 }
 

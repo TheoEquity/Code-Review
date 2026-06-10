@@ -907,11 +907,10 @@ const AdminConsolePage: React.FC = () => {
     const template = AUDIT_TEMPLATES.find(t => t.id === reviewForm.auditTemplate);
     let background = reviewForm.background;
     let rulePath = reviewForm.rulePath;
-    let templateName = '';
+    let templateName = template?.name || '';
     
     if (template && template.id !== 'all' && template.id !== 'custom') {
       rulePath = template.rulePath;
-      templateName = template.name;
       if (!background.trim()) {
         background = `本次审计类型：${template.name}。${template.description}。`;
       }
@@ -1676,6 +1675,7 @@ const AdminConsolePage: React.FC = () => {
                   <div>{t('admin.data.sessionFailures')}: <span className="text-slate-900">{sessionDetail.summary.llmFailures ?? 0}</span></div>
                   <div>警告: <span className="text-slate-900">{sessionDetail.summary.warningCount ?? 0}</span></div>
                   <div>{t('admin.data.reviewMode')}: <span className="text-slate-900">{sessionDetail.summary.reviewMode || '-'}</span></div>
+                  <div>审计模板: <span className="text-slate-900">{sessionDetail.summary.templateName || '-'}</span></div>
                 </div>
 
                 <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -2239,8 +2239,7 @@ const AdminConsolePage: React.FC = () => {
                   const deletingKey = `${sessionRepo}:${session.sessionID}`;
                   const deleting = deletingSessions.has(deletingKey);
                   
-                  // Use templateName directly from session
-                  const auditTemplate = session.templateName || (session.reviewMode === 'full' ? '全面审计' : '自定义');
+                  const auditTemplate = session.templateName || '-';
 
                   return (
                     <tr
