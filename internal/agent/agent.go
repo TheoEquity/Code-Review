@@ -758,10 +758,15 @@ func (a *Agent) filterByTemplateHints(diffs []model.Diff) []model.Diff {
 		index int
 	}
 
+	fileIndex := a.buildLightFileIndex(diffs, f.FileHints)
 	scored := make([]scoredDiff, 0, len(diffs))
 	matched := 0
 	for i, d := range diffs {
-		score := f.FileHintScore(effectivePath(d))
+		path := effectivePath(d)
+		score := f.FileHintScore(path)
+		if entry, ok := fileIndex[path]; ok && len(entry.HintMatches) > score {
+			score = len(entry.HintMatches)
+		}
 		if score > 0 {
 			matched++
 		}
